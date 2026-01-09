@@ -198,5 +198,43 @@ scholarly-ideas/
 - The features database is in `features.db` (SQLite)
 - NEVER edit or remove features - only mark them as passing
 - API keys must be added to `.env.local` before running
-- Python service runs on port 8000, Next.js on port 3000
+- Python service runs on port 8000, Next.js on port 3000 (or 3001 if 3000 is in use)
 - All user data is transient - no server-side persistence
+
+---
+
+## Session 3: Context Panel & Pseudo-Puzzle Detection (2026-01-09)
+
+### Completed Tasks
+
+#### 1. Context Panel Improvements ✅
+- Added clickable file items that open File Details modal
+- File Details shows: name, type, size, upload time, summary
+- Added clickable paper items that open Paper Details modal
+- Paper Details shows: title, authors, year, citations, discipline, abstract, link to Semantic Scholar
+- Both modals have proper close buttons and keyboard accessibility
+
+#### 2. Pseudo-Puzzle Detection Testing ✅
+- **Gap-spotting detection**: "literature has overlooked X" triggers probing questions
+- **Black-box detection**: "open the black box of X" triggers challenge about explanatory power
+- **Data dredging detection**: Multiple variable exploration triggers rigor warnings
+- All detection patterns working in mock mode (development fallback when API key not configured)
+
+#### 3. Features Completed This Session
+- #30: Context panel displays uploaded files - file details modal
+- #31: Context panel displays analysis results - shows stats and warnings
+- #32: Context panel displays literature findings - paper details modal
+- #33: Pseudo-puzzle detection for gap-spotting - probing questions work
+- #34: Pseudo-puzzle detection for black-box opening - challenge questions work
+- #35: Pseudo-puzzle detection for data dredging - rigor warnings displayed
+
+### Feature Statistics
+- Total: 175
+- Passing: 28
+- In Progress: 0
+- Percentage Complete: 16.0%
+
+### Technical Notes
+- Mock mode provides consistent pseudo-puzzle detection without API key
+- Rigor warnings from Python analysis service include sample_size and multiple_testing
+- Context panel items are now buttons with hover states for better UX

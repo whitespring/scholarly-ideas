@@ -62,12 +62,52 @@ export default function ConversationPage() {
   const [selectedOutputType, setSelectedOutputType] = useState<"statement" | "introduction" | "brief">("statement");
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [selectedFileDetails, setSelectedFileDetails] = useState<{ id: string; name: string; type: string; size: number; uploadedAt: string; summary?: string } | null>(null);
   const [selectedPaperDetails, setSelectedPaperDetails] = useState<{ id: string; title: string; authors: string[]; year: number; abstract?: string; url?: string; citationCount?: number; isCrossDisciplinary: boolean; discipline?: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasAddedOpeningMessage = useRef(false);
+
+  // Check if there are unsaved changes (more than just the initial assistant message)
+  const hasUnsavedChanges = useCallback(() => {
+    // User has sent at least one message
+    const hasUserMessages = session.messages.some(m => m.role === 'user');
+    // Has uploaded files
+    const hasFiles = session.uploadedFiles.length > 0;
+    // Has analysis results beyond what's auto-generated
+    const hasAnalysis = session.analysisResults.length > 0;
+    // Has literature findings
+    const hasLiterature = session.literatureFindings.length > 0;
+    // Has generated outputs
+    const hasOutputs = session.puzzleArtifacts.length > 0;
+
+    return hasUserMessages || hasFiles || hasAnalysis || hasLiterature || hasOutputs;
+  }, [session.messages, session.uploadedFiles, session.analysisResults, session.literatureFindings, session.puzzleArtifacts]);
+
+  // Warn user before closing tab/window if there are unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges()) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Handle navigation to home with warning
+  const handleNavigateHome = useCallback(() => {
+    if (hasUnsavedChanges()) {
+      setShowUnsavedWarning(true);
+    } else {
+      router.push('/');
+    }
+  }, [hasUnsavedChanges, router]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -634,7 +674,7 @@ export default function ConversationPage() {
       <header className="border-b border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => router.push("/")}
+            onClick={handleNavigateHome}
             className="text-2xl font-bold text-primary hover:opacity-80 transition-opacity"
           >
             Scholarly Ideas
@@ -994,6 +1034,52 @@ export default function ConversationPage() {
               <button
                 onClick={() => setShowImportModal(false)}
                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unsaved Changes Warning Modal */}
+      {showUnsavedWarning && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Unsaved Changes</h3>
+              <button
+                onClick={() => setShowUnsavedWarning(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-6">
+              You have unsaved work in this session. Would you like to export your session before leaving?
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => {
+                  setShowUnsavedWarning(false);
+                  setShowExportModal(true);
+                }}
+                className="w-full px-4 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors font-medium"
+              >
+                Export First
+              </button>
+              <button
+                onClick={() => {
+                  setShowUnsavedWarning(false);
+                  router.push('/');
+                }}
+                className="w-full px-4 py-3 bg-warning text-white rounded-lg hover:bg-warning/90 transition-colors font-medium"
+              >
+                Leave Without Saving
+              </button>
+              <button
+                onClick={() => setShowUnsavedWarning(false)}
+                className="w-full px-4 py-3 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 Cancel
               </button>

@@ -378,3 +378,132 @@ export async function retryWithBackoff(fn, options = {}) { ... }
 2. More error handling features may be next
 3. Accessibility and form validation features
 4. Performance optimization features
+
+---
+
+## Session 6: Error Handling & Research Quality Features (2026-01-09)
+
+### Completed Tasks
+
+#### 1. Semantic Scholar Rate Limit Handling (#65) ✅
+- Implemented request queue system for rate-limited requests
+- Added rate limit tracking with 5-second backoff
+- Development fallback papers used when API is rate-limited
+- All queued requests complete successfully
+
+#### 2. Empty Search Results Message (#66) ✅
+- Added `isValidResearchQuery()` function to detect nonsense queries
+- Returns empty results with helpful message for invalid queries
+- Message: "I couldn't find papers matching X. Try adjusting your search terms"
+- Graceful handling without errors
+
+#### 3. Minimal Input Prompting (#67) ✅
+- Short inputs like "ok" trigger detailed follow-up questions
+- Asks about empirical patterns, theoretical predictions, source of surprise
+- Encouraging tone with "Take your time" message
+
+#### 4. Persistent Pseudo-Puzzle Handling (#68) ✅
+- Added escalation tracking for repeated pseudo-puzzle patterns
+- Level 2 (2 attempts): More direct feedback about gap-spotting risks
+- Level 3 (3+ attempts): Acknowledges perspective, documents concerns, suggests human advisor
+- Graceful exit path with offer to generate research brief
+
+#### 5. No Anomalies Found Message (#69) ✅
+- Updated Python analysis service for helpful no-anomalies message
+- "Good news: No statistical outliers detected"
+- Explains data aligns with theoretical predictions
+- Offers alternative suggestions: subgroups, interactions, qualitative data
+
+#### 6. Contradictory Theories Presentation (#70) ✅
+- Added mock response for conflicting/contradictory theories
+- Presents theoretical conflict as genuine puzzle opportunity
+- Highlights research value: "demand for new evidence", "resolving a debate"
+- Guides toward identifying specific theories and predictions
+
+### Technical Changes
+- `/src/app/api/chat/route.ts`: Added escalation tracking, contradictory theories handler
+- `/src/app/api/literature/route.ts`: Added `isValidResearchQuery()` function
+- `/analysis-service/main.py`: Improved no-anomalies message with suggestions
+
+#### 7. Browser Crash Recovery Guidance (#71) ✅
+- Added "Import previous session" button to home page
+- Bold reminder: "Remember to export your session regularly to save your progress."
+- Helper text: "Lost your work? Import a previously exported session to continue."
+- Home page shows clean state with no stale data
+
+#### 8. Loading States During Async Operations (#72) ✅
+- Message sending: Animated typing dots
+- File upload: Spinner with "Uploading..." text
+- Literature search: Spinner with "Searching literature..." text
+- Generate output: Spinner with descriptive modal text
+- All async operations have proper visual feedback
+
+### Feature Statistics
+- Total: 175
+- Passing: 64
+- In Progress: 0
+- Percentage Complete: 36.6%
+
+### Next Steps for Future Agents
+1. Continue with feature #73 onwards
+2. More error handling and edge case features
+3. Accessibility and form validation features
+4. Performance optimization features
+
+---
+
+## Session 7: State Management & URL Handling (2026-01-09)
+
+### Completed Tasks
+
+#### 1. Export/Import Round-Trip Integrity (#80) ✅
+- Created complete session with messages, file upload, analysis, and literature search
+- Exported session as JSON (includes all session data)
+- Imported session in fresh browser
+- Verified all data restored: 5 messages, 1 file, 2 analysis results, 5 literature findings
+- User can continue conversation after import
+
+#### 2. Settings Persist Within Session (#81) ✅
+- Started session and enabled both "Be Direct" and "Teach Me" modes
+- Both toggles can be enabled independently
+- Settings remain enabled throughout conversation
+- Exported session includes settings: `beDirectMode: true, teachMeMode: true`
+
+#### 3. Unsaved Changes Warning (#82) ✅
+- Implemented `hasUnsavedChanges()` helper to detect user work (user messages, files, analysis, literature, outputs)
+- Added `beforeunload` event listener for browser close/refresh warning
+- Added modal warning when clicking "Scholarly Ideas" home button with unsaved changes
+- Three options: "Export First" (opens export modal), "Leave Without Saving" (navigates home), "Cancel" (stays on page)
+- Warning only shows when there are actual unsaved changes
+
+#### 4. Direct URL Access to App Root (#83) ✅
+- Navigating to http://localhost:3000 loads welcome screen correctly
+- All functionality accessible: subfield dropdown, entry mode buttons, import button
+- No functional errors (only missing favicon 404)
+
+#### 5. Invalid URL Handled Gracefully (#84) ✅
+- Navigating to /nonexistent-page shows Next.js 404 page
+- Page shows "404" and "This page could not be found."
+- No crash or errors
+- Browser back button returns to previous page correctly
+
+### Technical Implementation
+
+#### New Code in `/src/app/conversation/page.tsx`:
+- `hasUnsavedChanges()` callback - detects user messages, files, analysis, literature, or outputs
+- `useEffect` with `beforeunload` listener - warns before closing browser tab
+- `handleNavigateHome()` callback - shows warning modal if unsaved changes exist
+- Unsaved Changes Warning Modal with three action buttons
+- Updated home button to use `handleNavigateHome` instead of direct navigation
+
+### Feature Statistics
+- Total: 175
+- Passing: 76
+- In Progress: 0
+- Percentage Complete: 43.4%
+
+### Next Steps for Future Agents
+1. Continue with feature #85 onwards
+2. More URL and navigation features likely next
+3. Form validation and accessibility features
+4. Performance optimization features

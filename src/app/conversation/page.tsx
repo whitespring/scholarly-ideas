@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/context/SessionContext";
 import { cn, formatTimestamp } from "@/lib/utils";
-import type { Message } from "@/types";
+import type { Message, AnalysisResult } from "@/types";
 import {
   Send,
   Upload,
@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Loader2,
   X,
+  FileText,
 } from "lucide-react";
 
 // Opening prompts based on mode
@@ -27,22 +28,27 @@ const openingPrompts: Record<string, string> = {
 
 export default function ConversationPage() {
   const router = useRouter();
-  const { session, addMessage, updateSettings } = useSession();
+  const { session, addMessage, updateSettings, addFile, addAnalysis } = useSession();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasAddedOpeningMessage = useRef(false);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session.messages]);
 
-  // Add opening prompt if no messages
+  // Add opening prompt if no messages (only once)
   useEffect(() => {
-    if (session.messages.length === 0 && session.mode) {
+    if (session.messages.length === 0 && session.mode && !hasAddedOpeningMessage.current) {
+      hasAddedOpeningMessage.current = true;
       addMessage({
         role: "assistant",
         content: openingPrompts[session.mode] || openingPrompts.idea,
@@ -104,8 +110,78 @@ export default function ConversationPage() {
   };
 
   const handleUpload = () => {
-    // TODO: Implement file upload modal
-    console.log("Upload clicked");
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to upload file");
+      }
+
+      // Add file to session
+      addFile({
+        name: file.name,
+        type: file.type || data.summary.file_type,
+        size: file.size,
+        summary: `${data.summary.rows} rows, ${data.summary.columns} columns`,
+      });
+
+      // Add analysis result with variable statistics
+      const variableStats = data.summary.variables || [];
+      const numericVars = variableStats.filter((v: { mean?: number }) => v.mean !== undefined && v.mean !== null);
+      const categoricalVars = variableStats.filter((v: { unique?: number }) => v.unique !== undefined);
+
+      addAnalysis({
+        type: "descriptive",
+        summary: `Loaded ${file.name}: ${data.summary.rows} rows, ${data.summary.columns} columns. ${numericVars.length} numeric and ${categoricalVars.length} categorical variables.`,
+        details: {
+          variables: variableStats,
+          rows: data.summary.rows,
+          columns: data.summary.columns,
+        },
+        rigorWarnings: data.summary.rows < 30 ? [
+          {
+            type: "sample_size" as const,
+            message: `Small sample size (n=${data.summary.rows}). Results may not be generalizable.`,
+            severity: "high" as const,
+          }
+        ] : [],
+      });
+
+      // Add a message to the conversation about the upload
+      addMessage({
+        role: "assistant",
+        content: `I've received your data file "${file.name}". Here's a quick summary:\n\n**File Details:**\n- ${data.summary.rows} observations (rows)\n- ${data.summary.columns} variables (columns)\n- Format: ${data.summary.file_type.toUpperCase()}\n\n${numericVars.length > 0 ? `**Numeric Variables:** ${numericVars.map((v: { name: string }) => v.name).join(", ")}\n\n` : ""}${categoricalVars.length > 0 ? `**Categorical Variables:** ${categoricalVars.map((v: { name: string }) => v.name).join(", ")}\n\n` : ""}What stands out to you in this data? What patterns or surprises did you notice when collecting it?`,
+        metadata: { phase: "probing", analysisTriggered: true },
+      });
+
+    } catch (error) {
+      console.error("Upload error:", error);
+      setUploadError(error instanceof Error ? error.message : "Failed to upload file");
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   };
 
   const handleSearchLiterature = () => {
@@ -238,14 +314,43 @@ export default function ConversationPage() {
 
           {/* Input area */}
           <div className="border-t border-gray-200 bg-white p-4">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleFileChange}
+              accept=".csv,.xlsx,.xls,.dta,.sav,.rds,.rda,.rdata,.txt,.pdf"
+              className="hidden"
+            />
+
+            {/* Upload error message */}
+            {uploadError && (
+              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">
+                <span>{uploadError}</span>
+                <button onClick={() => setUploadError(null)} className="text-red-500 hover:text-red-700">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
             {/* Action buttons */}
             <div className="flex gap-2 mb-3">
               <button
                 onClick={handleUpload}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                disabled={isUploading}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                  isUploading
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    : "text-gray-600 hover:bg-gray-100"
+                )}
               >
-                <Upload className="h-4 w-4" />
-                Upload File
+                {isUploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                {isUploading ? "Uploading..." : "Upload File"}
               </button>
               <button
                 onClick={handleSearchLiterature}
@@ -370,6 +475,33 @@ export default function ConversationPage() {
                       <p className="text-xs text-gray-600 mt-1">
                         {result.summary}
                       </p>
+                      {/* Show variable statistics if available */}
+                      {result.details?.variables && Array.isArray(result.details.variables) && (
+                        <div className="mt-2 space-y-1">
+                          <div className="text-xs font-medium text-gray-600">Variable Statistics:</div>
+                          {(result.details.variables as Array<{name: string; mean?: number; std?: number; median?: number; min?: number; max?: number; unique?: number; dtype: string}>).slice(0, 5).map((v, i) => (
+                            <div key={i} className="text-xs text-gray-500 pl-2 border-l-2 border-gray-200">
+                              <span className="font-medium">{v.name}</span>
+                              <span className="text-gray-400"> ({v.dtype})</span>
+                              {v.mean !== undefined && v.mean !== null && (
+                                <div className="pl-2">
+                                  Mean: {v.mean.toFixed(2)},
+                                  Std: {v.std?.toFixed(2) || 'N/A'},
+                                  Med: {v.median?.toFixed(2) || 'N/A'}
+                                </div>
+                              )}
+                              {v.unique !== undefined && (
+                                <div className="pl-2">Unique values: {v.unique}</div>
+                              )}
+                            </div>
+                          ))}
+                          {(result.details.variables as Array<unknown>).length > 5 && (
+                            <div className="text-xs text-gray-400 pl-2">
+                              +{(result.details.variables as Array<unknown>).length - 5} more variables...
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {result.rigorWarnings.length > 0 && (
                         <div className="mt-2 text-xs text-warning">
                           ⚠️ {result.rigorWarnings.length} warning(s)

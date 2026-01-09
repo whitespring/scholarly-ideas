@@ -4,9 +4,98 @@ import { generateId, getCurrentTimestamp } from "@/lib/utils";
 import type { ChatRequest, ChatResponse } from "@/types/api";
 import type { Message } from "@/types/session";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Check if we have a valid API key (not a placeholder)
+const apiKey = process.env.ANTHROPIC_API_KEY;
+const hasValidApiKey = apiKey && !apiKey.includes("your_") && apiKey.length > 20;
+
+const anthropic = hasValidApiKey
+  ? new Anthropic({ apiKey })
+  : null;
+
+// Development mode mock responses based on user input
+function generateMockResponse(userMessage: string, currentPhase: string): string {
+  const messageLower = userMessage.toLowerCase();
+
+  // Check for common puzzle-related patterns
+  if (messageLower.includes("conflict") && messageLower.includes("team")) {
+    return `That's a fascinating observation about team conflict and performance. This touches on a real tension in organizational behavior research.
+
+Let me probe a bit deeper:
+
+1. **What specific type of conflict are you observing?** Researchers typically distinguish between task conflict (disagreements about work content), relationship conflict (interpersonal friction), and process conflict (disagreements about how to do things). The performance effects can differ substantially by type.
+
+2. **In what context did you observe this pattern?** Was this in your own data, in a specific organization you studied, or something you noticed across multiple studies in the literature?
+
+3. **What does existing theory predict?** Classical team effectiveness models (like those from Hackman or Kozlowski) generally predict that conflict should be detrimental. What made you expect teams with high conflict to perform worse?
+
+Understanding these details will help us determine whether you've identified a genuine puzzle—an empirical pattern that contradicts theoretical predictions—or whether there might be moderating conditions that existing theory already accounts for.`;
+  }
+
+  if (messageLower.includes("gap") || messageLower.includes("overlooked") || messageLower.includes("understudied")) {
+    return `I want to make sure we're building toward a genuine research puzzle here. When we say the literature has "overlooked" something or there's a "gap," that's often a starting point—but the strongest research puzzles go beyond identifying unstudied topics.
+
+Let me ask: **What makes this gap puzzling?**
+
+In other words, is there:
+- An empirical pattern that we'd expect to see explained, but isn't?
+- A theoretical prediction that doesn't match what we observe in practice?
+- Something surprising happening in organizations that contradicts what our theories would predict?
+
+The difference matters because "X hasn't been studied" invites the response "maybe X isn't important enough to study." But "X happens in ways that contradict theory Y" demands explanation.
+
+Can you tell me more about what you've observed that made you notice this gap in the first place?`;
+  }
+
+  if (messageLower.includes("black box") || messageLower.includes("mechanism") || messageLower.includes("how") && messageLower.includes("why")) {
+    return `"Opening the black box" can be valuable research, but let me push a bit on this framing.
+
+The key question is: **Would understanding the mechanism change our theoretical predictions?**
+
+Sometimes when we "open the black box" of a process, we discover that:
+- The mechanism works exactly as we'd expect, just with more detail
+- The added detail doesn't change what we predict or how we'd intervene
+
+The strongest puzzle here would be if you have reason to believe that the mechanism works *differently* than current theory predicts—that understanding the "how" would reveal something surprising.
+
+Can you tell me:
+1. What does current theory predict about how this process works?
+2. What have you observed (or do you suspect) that might contradict that prediction?
+3. What would change in our understanding if the mechanism is different than assumed?`;
+  }
+
+  // Default response for other inputs
+  if (currentPhase === "opening" || currentPhase === "probing") {
+    return `Thank you for sharing that. I want to make sure I understand the foundation of your research interest.
+
+A few clarifying questions:
+
+1. **What's the specific empirical pattern you've observed?** Can you describe what you've actually seen—whether in data, in fieldwork, or in a particular case—that sparked this interest?
+
+2. **What would theory predict?** Based on established frameworks in your area, what should we expect to happen?
+
+3. **Where does the surprise come from?** What makes this pattern unexpected or hard to explain with existing theory?
+
+These questions help us move toward articulating a genuine puzzle—not just an interesting topic, but a pattern that demands explanation because it contradicts our current theoretical understanding.
+
+Take your time—the most important thing is being specific about what you've observed.`;
+  }
+
+  return `I appreciate you sharing that perspective. Let's work together to refine this into a compelling research puzzle.
+
+The strongest puzzles in management research have these elements:
+- A clear empirical pattern (what you've actually observed)
+- A theoretical prediction that this pattern contradicts
+- Implications for what evidence would resolve the puzzle
+
+Based on what you've told me so far, could you elaborate on which of these elements you feel most confident about, and which might need more development?
+
+I'm here to help you articulate this in a way that will be rigorous and compelling to reviewers.`;
+}
+
+// Log when using mock mode for transparency
+if (!hasValidApiKey) {
+  console.log("⚠️ Chat API running in MOCK MODE - Configure ANTHROPIC_API_KEY in .env.local for live responses");
+}
 
 // System prompt for the research puzzle assistant
 function buildSystemPrompt(
@@ -105,25 +194,35 @@ export async function POST(request: NextRequest) {
 
     const systemPrompt = buildSystemPrompt(settings, currentPhase, subfield) + additionalContext;
 
-    // Convert messages to Anthropic format
-    const anthropicMessages = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+    let responseContent: string;
 
-    // Call Claude API
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: anthropicMessages,
-    });
+    // Use mock response in development if no valid API key
+    if (!anthropic) {
+      // Get the last user message for generating a contextual mock response
+      const lastUserMessage = messages.filter(m => m.role === "user").pop();
+      responseContent = generateMockResponse(lastUserMessage?.content || "", currentPhase);
+      console.log("📝 Using mock response (no valid API key configured)");
+    } else {
+      // Convert messages to Anthropic format
+      const anthropicMessages = messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
 
-    // Extract response content
-    const responseContent =
-      response.content[0].type === "text" ? response.content[0].text : "";
+      // Call Claude API
+      const response = await anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: anthropicMessages,
+      });
+
+      // Extract response content
+      responseContent =
+        response.content[0].type === "text" ? response.content[0].text : "";
+    }
 
     // Build response message
     const assistantMessage: Message = {

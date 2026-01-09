@@ -30,7 +30,7 @@ const openingPrompts: Record<string, string> = {
 
 export default function ConversationPage() {
   const router = useRouter();
-  const { session, addMessage, updateSettings, addFile, addAnalysis, addLiterature, addArtifact, importSession } = useSession();
+  const { session, addMessage, updateSettings, addFile, removeFile, addAnalysis, addLiterature, addArtifact, importSession } = useSession();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -1141,7 +1141,16 @@ export default function ConversationPage() {
               )}
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  removeFile(selectedFileDetails.id);
+                  setSelectedFileDetails(null);
+                }}
+                className="px-4 py-2 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
+              >
+                Remove File
+              </button>
               <button
                 onClick={() => setSelectedFileDetails(null)}
                 className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"

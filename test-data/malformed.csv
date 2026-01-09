@@ -1,4 +1,3 @@
-this is not,,,, valid csv
-"unclosed quote,value
-column1
-data without header match,extra,columns,here,and,more
+this is not a valid csv file
+with broken,structure
+"unclosed quote

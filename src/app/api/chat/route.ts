@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { generateId, getCurrentTimestamp } from "@/lib/utils";
+import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from "@/lib/rate-limit";
 import type { ChatRequest, ChatResponse } from "@/types/api";
 import type { Message } from "@/types/session";
 
@@ -334,6 +335,30 @@ function getPhaseGuidance(phase: string): string {
 
 export async function POST(request: NextRequest) {
   try {
+    // Check rate limit
+    const clientId = getClientIdentifier(request);
+    const rateLimitResult = checkRateLimit(clientId, RATE_LIMITS.chat);
+
+    if (!rateLimitResult.allowed) {
+      const waitSeconds = Math.ceil(rateLimitResult.resetIn / 1000);
+      return NextResponse.json(
+        {
+          error: "rate_limit",
+          message: `You're sending messages too quickly. Please wait ${waitSeconds} seconds before trying again.`,
+          retryAfter: waitSeconds,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": waitSeconds.toString(),
+            "X-RateLimit-Limit": rateLimitResult.limit.toString(),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": Math.ceil(Date.now() / 1000 + rateLimitResult.resetIn / 1000).toString(),
+          },
+        }
+      );
+    }
+
     const body: ChatRequest = await request.json();
     const { messages, settings, currentPhase, subfield, analysisContext, literatureContext } = body;
 

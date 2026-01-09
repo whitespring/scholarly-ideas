@@ -124,8 +124,25 @@ function sessionReducer(state: Session, action: SessionAction): Session {
       };
 
     case "IMPORT_SESSION":
+      // Gracefully handle old session formats by providing defaults for missing fields
+      const defaultSession = createInitialSession();
       return {
-        ...action.payload,
+        ...defaultSession, // Start with all default values
+        ...action.payload, // Override with imported values
+        // Ensure arrays are always arrays (handle missing fields from old formats)
+        uploadedFiles: Array.isArray(action.payload.uploadedFiles) ? action.payload.uploadedFiles : [],
+        analysisResults: Array.isArray(action.payload.analysisResults) ? action.payload.analysisResults : [],
+        literatureFindings: Array.isArray(action.payload.literatureFindings) ? action.payload.literatureFindings : [],
+        puzzleArtifacts: Array.isArray(action.payload.puzzleArtifacts) ? action.payload.puzzleArtifacts : [],
+        messages: Array.isArray(action.payload.messages) ? action.payload.messages : [],
+        // Ensure settings object exists with defaults
+        settings: {
+          ...defaultSession.settings,
+          ...(action.payload.settings || {}),
+        },
+        // Ensure other required fields have defaults
+        currentPhase: action.payload.currentPhase || "opening",
+        feedbackEscalation: typeof action.payload.feedbackEscalation === "number" ? action.payload.feedbackEscalation : 0,
         lastModified: now,
       };
 

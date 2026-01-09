@@ -18,7 +18,9 @@ import {
   FileText,
   Download,
   FileUp,
+  FileDown,
 } from "lucide-react";
+import jsPDF from "jspdf";
 
 // Opening prompts based on mode
 const openingPrompts: Record<string, string> = {
@@ -169,6 +171,15 @@ export default function ConversationPage() {
             timeout: 60000, // 60 second timeout for LLM calls
           });
 
+          // Handle rate limit error specifically
+          if (response.status === 429) {
+            const errorData = await response.json();
+            const rateLimitError = new Error(errorData.message || "Rate limit exceeded");
+            (rateLimitError as Error & { isRateLimit: boolean; retryAfter?: number }).isRateLimit = true;
+            (rateLimitError as Error & { retryAfter?: number }).retryAfter = errorData.retryAfter;
+            throw rateLimitError;
+          }
+
           if (!response.ok) {
             throw new Error("Failed to get response");
           }
@@ -180,6 +191,10 @@ export default function ConversationPage() {
           initialDelay: 1000,
           maxDelay: 5000,
           shouldRetry: (error) => {
+            // Don't retry rate limit errors
+            if ((error as Error & { isRateLimit?: boolean }).isRateLimit) {
+              return false;
+            }
             // Retry on timeout (AbortError) or server errors
             if (error instanceof Error) {
               return error.name === 'AbortError' || error.message.includes('timeout');
@@ -192,12 +207,16 @@ export default function ConversationPage() {
       addMessage(data.message);
     } catch (error) {
       console.error("Chat error:", error);
-      // Determine if this is a timeout error
+      // Determine error type for appropriate user message
+      const isRateLimitError = (error as Error & { isRateLimit?: boolean }).isRateLimit;
+      const retryAfter = (error as Error & { retryAfter?: number }).retryAfter;
       const isTimeoutError = error instanceof Error && (error.name === 'AbortError' || error.message.includes('timeout'));
       const isNetworkError = error instanceof TypeError && error.message.includes('fetch');
 
       let errorMessage: string;
-      if (isTimeoutError) {
+      if (isRateLimitError) {
+        errorMessage = `You're sending messages too quickly. Please wait ${retryAfter || 60} seconds before trying again. Your conversation is saved and you can continue shortly.`;
+      } else if (isTimeoutError) {
         errorMessage = "The request took too long and timed out. The server might be busy. Please try again in a moment. Your conversation context is preserved.";
       } else if (isNetworkError) {
         errorMessage = "Unable to connect to the server. Please check your internet connection and try again.";
@@ -652,6 +671,274 @@ export default function ConversationPage() {
     setSuccessMessage("Outputs exported successfully!");
   };
 
+  const handleExportOutputsPDF = () => {
+    if (session.puzzleArtifacts.length === 0) return;
+
+    // Create a new PDF document
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - 2 * margin;
+    let yPos = margin;
+
+    // Helper function to add text with word wrap
+    const addWrappedText = (text: string, fontSize: number, isBold: boolean = false) => {
+      doc.setFontSize(fontSize);
+      doc.setFont("helvetica", isBold ? "bold" : "normal");
+      const lines = doc.splitTextToSize(text, contentWidth);
+      const lineHeight = fontSize * 0.4;
+
+      for (const line of lines) {
+        if (yPos + lineHeight > pageHeight - margin) {
+          doc.addPage();
+          yPos = margin;
+        }
+        doc.text(line, margin, yPos);
+        yPos += lineHeight;
+      }
+      yPos += 2; // Add spacing after paragraph
+    };
+
+    // Helper function to add a section divider
+    const addSectionDivider = () => {
+      yPos += 5;
+      if (yPos > pageHeight - margin - 10) {
+        doc.addPage();
+        yPos = margin;
+      }
+    };
+
+    // Title
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 58, 138); // Primary blue
+    doc.text("Scholarly Ideas", margin, yPos);
+    yPos += 12;
+
+    // Subtitle
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text("Generated Outputs", margin, yPos);
+    yPos += 8;
+
+    // Export metadata
+    doc.setFontSize(10);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Exported: ${new Date().toLocaleString()}`, margin, yPos);
+    yPos += 10;
+
+    // Reset text color
+    doc.setTextColor(0, 0, 0);
+
+    // Add each generated output
+    for (const artifact of session.puzzleArtifacts) {
+      addSectionDivider();
+
+      // Output type header
+      const typeLabel = artifact.type === "statement" ? "Puzzle Statement" :
+                       artifact.type === "introduction" ? "Introduction Draft" :
+                       artifact.type === "brief" ? "Research Brief" : artifact.type;
+
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 58, 138);
+      doc.text(`${typeLabel} (v${artifact.version})`, margin, yPos);
+      yPos += 8;
+      doc.setTextColor(0, 0, 0);
+
+      // Output content
+      addWrappedText(artifact.content, 11);
+      addSectionDivider();
+    }
+
+    // Footer on all pages
+    const pageCount = doc.internal.pages.length - 1;
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(
+        `Page ${i} of ${pageCount} | Generated by Scholarly Ideas`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: "center" }
+      );
+    }
+
+    // Save the PDF
+    doc.save(`scholarly-ideas-outputs-${new Date().toISOString().slice(0, 10)}.pdf`);
+    setShowExportModal(false);
+    setSuccessMessage("Outputs PDF exported successfully!");
+  };
+
+  const handleExportPDF = () => {
+    // Create a new PDF document
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - 2 * margin;
+    let yPos = margin;
+
+    // Helper function to add text with word wrap
+    const addWrappedText = (text: string, fontSize: number, isBold: boolean = false) => {
+      doc.setFontSize(fontSize);
+      doc.setFont("helvetica", isBold ? "bold" : "normal");
+      const lines = doc.splitTextToSize(text, contentWidth);
+      const lineHeight = fontSize * 0.4;
+
+      for (const line of lines) {
+        if (yPos + lineHeight > pageHeight - margin) {
+          doc.addPage();
+          yPos = margin;
+        }
+        doc.text(line, margin, yPos);
+        yPos += lineHeight;
+      }
+      yPos += 2; // Add spacing after paragraph
+    };
+
+    // Helper function to add a section divider
+    const addSectionDivider = () => {
+      yPos += 5;
+      if (yPos > pageHeight - margin - 10) {
+        doc.addPage();
+        yPos = margin;
+      }
+    };
+
+    // Title
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 58, 138); // Primary blue
+    doc.text("Scholarly Ideas", margin, yPos);
+    yPos += 12;
+
+    // Subtitle
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text("Research Puzzle Development Session", margin, yPos);
+    yPos += 8;
+
+    // Session metadata
+    doc.setFontSize(10);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Exported: ${new Date().toLocaleString()}`, margin, yPos);
+    yPos += 5;
+    if (session.subfield) {
+      doc.text(`Subfield: ${session.subfield}`, margin, yPos);
+      yPos += 5;
+    }
+    doc.text(`Mode: ${session.mode === 'idea' ? 'I have an idea' : session.mode === 'data' ? 'I have data' : "I'm exploring"}`, margin, yPos);
+    yPos += 10;
+
+    // Reset text color
+    doc.setTextColor(0, 0, 0);
+
+    // Add generated outputs if any
+    if (session.puzzleArtifacts.length > 0) {
+      addSectionDivider();
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 58, 138);
+      doc.text("Generated Outputs", margin, yPos);
+      yPos += 10;
+      doc.setTextColor(0, 0, 0);
+
+      for (const artifact of session.puzzleArtifacts) {
+        // Output type header
+        const typeLabel = artifact.type === "statement" ? "Puzzle Statement" :
+                         artifact.type === "introduction" ? "Introduction Draft" :
+                         "Research Brief";
+
+        addWrappedText(`${typeLabel} (v${artifact.version})`, 14, true);
+        yPos += 2;
+
+        // Output content
+        addWrappedText(artifact.content, 11);
+        addSectionDivider();
+      }
+    }
+
+    // Add literature findings if any
+    if (session.literatureFindings.length > 0) {
+      addSectionDivider();
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 58, 138);
+      doc.text("Literature Findings", margin, yPos);
+      yPos += 10;
+      doc.setTextColor(0, 0, 0);
+
+      for (const paper of session.literatureFindings) {
+        addWrappedText(`• ${paper.title}`, 11, true);
+        addWrappedText(`  ${paper.authors.join(", ")} (${paper.year})`, 10);
+        if (paper.isCrossDisciplinary && paper.discipline) {
+          doc.setTextColor(100, 100, 100);
+          addWrappedText(`  Cross-disciplinary: ${paper.discipline}`, 9);
+          doc.setTextColor(0, 0, 0);
+        }
+        yPos += 2;
+      }
+    }
+
+    // Add conversation summary
+    if (session.messages.length > 1) {
+      addSectionDivider();
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 58, 138);
+      doc.text("Conversation Summary", margin, yPos);
+      yPos += 10;
+      doc.setTextColor(0, 0, 0);
+
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`${session.messages.length} messages exchanged`, margin, yPos);
+      yPos += 8;
+      doc.setTextColor(0, 0, 0);
+
+      // Add key user messages (filter to user role only, limit to prevent huge PDFs)
+      const userMessages = session.messages.filter(m => m.role === 'user').slice(0, 10);
+      for (const msg of userMessages) {
+        addWrappedText(`You: ${msg.content.substring(0, 300)}${msg.content.length > 300 ? '...' : ''}`, 10);
+        yPos += 3;
+      }
+    }
+
+    // Footer on last page
+    const pageCount = doc.internal.pages.length - 1;
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(
+        `Page ${i} of ${pageCount} | Generated by Scholarly Ideas`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: "center" }
+      );
+    }
+
+    // Save the PDF
+    doc.save(`scholarly-ideas-${new Date().toISOString().slice(0, 10)}.pdf`);
+    setShowExportModal(false);
+    setSuccessMessage("PDF exported successfully!");
+  };
+
   const handleImportSession = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1002,21 +1289,56 @@ export default function ConversationPage() {
                   Full session with all messages, analysis results, and literature findings. Can be re-imported later.
                 </p>
               </button>
-              <button
-                onClick={handleExportOutputsOnly}
-                disabled={session.puzzleArtifacts.length === 0}
+              <div
                 className={cn(
                   "w-full text-left p-4 border border-gray-200 rounded-lg transition-colors",
-                  session.puzzleArtifacts.length > 0
-                    ? "hover:border-primary hover:bg-primary/5"
-                    : "opacity-50 cursor-not-allowed"
+                  session.puzzleArtifacts.length === 0 && "opacity-50"
                 )}
               >
                 <h4 className="font-semibold text-gray-800 mb-1">Export Outputs Only</h4>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-gray-600 mb-3">
                   {session.puzzleArtifacts.length > 0
                     ? `Export ${session.puzzleArtifacts.length} generated artifact(s) only.`
                     : "No outputs generated yet."}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleExportOutputsOnly}
+                    disabled={session.puzzleArtifacts.length === 0}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-sm rounded-lg border transition-colors",
+                      session.puzzleArtifacts.length > 0
+                        ? "border-gray-300 hover:border-primary hover:bg-primary/5"
+                        : "cursor-not-allowed border-gray-200"
+                    )}
+                  >
+                    JSON Format
+                  </button>
+                  <button
+                    onClick={handleExportOutputsPDF}
+                    disabled={session.puzzleArtifacts.length === 0}
+                    className={cn(
+                      "flex-1 px-3 py-2 text-sm rounded-lg border transition-colors flex items-center justify-center gap-1",
+                      session.puzzleArtifacts.length > 0
+                        ? "border-gray-300 hover:border-primary hover:bg-primary/5"
+                        : "cursor-not-allowed border-gray-200"
+                    )}
+                  >
+                    <FileDown className="h-4 w-4" />
+                    PDF Format
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={handleExportPDF}
+                className="w-full text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <FileDown className="h-5 w-5 text-primary" />
+                  <h4 className="font-semibold text-gray-800">Export as PDF</h4>
+                </div>
+                <p className="text-sm text-gray-600">
+                  Polished, professional PDF document with outputs, literature findings, and conversation summary.
                 </p>
               </button>
             </div>

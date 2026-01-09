@@ -1,4 +1,1 @@
-{
-  "someKey": "this is valid json",
-  "but": "missing required session fields"
-}
+{"something": "random", "data": [1, 2, 3]}

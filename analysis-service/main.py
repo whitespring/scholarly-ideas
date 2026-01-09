@@ -13,6 +13,8 @@ import pandas as pd
 import numpy as np
 from io import BytesIO
 import json
+import tempfile
+import os
 
 app = FastAPI(
     title="Scholarly Ideas Analysis Service",
@@ -63,6 +65,59 @@ class AnalysisResult(BaseModel):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "analysis"}
+
+
+# Test endpoint to create sample files in various formats
+@app.get("/create-test-files")
+async def create_test_files():
+    """Create sample test files in different formats for testing."""
+    import pyreadstat
+
+    # Create sample data
+    np.random.seed(42)
+    n = 50
+    data = {
+        'id': range(1, n + 1),
+        'department': np.random.choice(['Sales', 'Engineering', 'Marketing', 'HR'], n),
+        'tenure': np.random.uniform(0.5, 15, n).round(1),
+        'salary': np.random.normal(75000, 15000, n).round(0),
+        'performance': np.random.uniform(1, 5, n).round(2),
+    }
+    df = pd.DataFrame(data)
+
+    results = {}
+    test_data_dir = os.path.join(os.path.dirname(__file__), '..', 'test-data')
+
+    # Create SPSS file
+    try:
+        sav_path = os.path.join(test_data_dir, 'test_employee.sav')
+        pyreadstat.write_sav(df, sav_path)
+        results['spss'] = f"Created {sav_path}"
+    except Exception as e:
+        results['spss'] = f"Error: {e}"
+
+    # Create Stata file
+    try:
+        dta_path = os.path.join(test_data_dir, 'test_employee.dta')
+        pyreadstat.write_dta(df, dta_path)
+        results['stata'] = f"Created {dta_path}"
+    except Exception as e:
+        results['stata'] = f"Error: {e}"
+
+    # Create R data file (.rds) - using pyreadr if available
+    try:
+        import pyreadr
+        rds_path = os.path.join(test_data_dir, 'test_employee.rds')
+        pyreadr.write_rds(rds_path, df)
+        results['r_rds'] = f"Created {rds_path}"
+    except ImportError:
+        # pyreadr not available, try creating a simple RDS file manually
+        # The rdata library can only read, not write R files
+        results['r_rds'] = "pyreadr not installed - cannot create R files"
+    except Exception as e:
+        results['r_rds'] = f"Error: {e}"
+
+    return results
 
 
 # File upload and summary
@@ -133,30 +188,98 @@ def read_data_file(content: bytes, extension: str) -> pd.DataFrame:
         return pd.read_excel(buffer)
     elif extension in ["dta"]:
         import pyreadstat
-        df, meta = pyreadstat.read_dta(buffer)
-        return df
+        # pyreadstat requires a file path, not BytesIO
+        with tempfile.NamedTemporaryFile(suffix='.dta', delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            df, meta = pyreadstat.read_dta(tmp_path)
+            return df
+        finally:
+            os.unlink(tmp_path)
     elif extension in ["sav"]:
         import pyreadstat
-        df, meta = pyreadstat.read_sav(buffer)
-        return df
+        # pyreadstat requires a file path, not BytesIO
+        # Use mode='wb' explicitly for binary write
+        with tempfile.NamedTemporaryFile(suffix='.sav', delete=False, mode='wb') as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            print(f"SPSS file size: {len(content)} bytes, temp path: {tmp_path}")
+            print(f"First 20 bytes: {content[:20]}")
+            # Try read_sav first (standard SPSS format)
+            df, meta = pyreadstat.read_sav(tmp_path)
+            return df
+        except Exception as e1:
+            print(f"SPSS read_sav error: {e1}")
+            try:
+                # Try pandas read_spss as fallback
+                df = pd.read_spss(tmp_path)
+                return df
+            except Exception as e2:
+                print(f"Pandas read_spss error: {e2}")
+                raise ValueError(f"Could not read SPSS file. Errors: sav={e1}, pandas={e2}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     elif extension in ["rds"]:
         import rdata
-        parsed = rdata.parser.parse_file(buffer)
-        converted = rdata.conversion.convert(parsed)
-        # rds files contain a single object
-        if isinstance(converted, pd.DataFrame):
-            return converted
-        raise ValueError("RDS file does not contain a DataFrame")
+        import warnings
+        # rdata requires a file path, not BytesIO
+        print(f"RDS file size: {len(content)} bytes")
+        print(f"First 20 bytes: {content[:20]}")
+        with tempfile.NamedTemporaryFile(suffix='.rds', delete=False, mode='wb') as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            parsed = rdata.parser.parse_file(tmp_path)
+            # Suppress encoding warnings and use default_encoding to handle non-ASCII data
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                try:
+                    converted = rdata.conversion.convert(parsed, default_encoding='latin1')
+                except TypeError:
+                    # Older versions of rdata may not support default_encoding
+                    converted = rdata.conversion.convert(parsed)
+            print(f"RDS converted type: {type(converted)}")
+            # rds files contain a single object
+            if isinstance(converted, pd.DataFrame):
+                return converted
+            # If it's not a DataFrame directly, check if it's dict-like with dataframes inside
+            if hasattr(converted, 'keys'):
+                for key in converted:
+                    if isinstance(converted[key], pd.DataFrame):
+                        return converted[key]
+            raise ValueError(f"RDS file does not contain a DataFrame. Got: {type(converted)}")
+        except Exception as e:
+            print(f"RDS parse error: {e}")
+            raise
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     elif extension in ["rda", "rdata"]:
         import rdata
-        parsed = rdata.parser.parse_file(buffer)
-        converted = rdata.conversion.convert(parsed)
-        # rda files contain a dict of objects
-        if isinstance(converted, dict):
-            for key, value in converted.items():
-                if isinstance(value, pd.DataFrame):
-                    return value
-        raise ValueError("RDA file does not contain a DataFrame")
+        # rdata requires a file path, not BytesIO
+        with tempfile.NamedTemporaryFile(suffix=f'.{extension}', delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            parsed = rdata.parser.parse_file(tmp_path)
+            converted = rdata.conversion.convert(parsed)
+            # rda files contain a dict of objects
+            if isinstance(converted, dict):
+                for key, value in converted.items():
+                    if isinstance(value, pd.DataFrame):
+                        return value
+            raise ValueError("RDA file does not contain a DataFrame")
+        finally:
+            os.unlink(tmp_path)
+    elif extension in ["pdf"]:
+        # PDF files are not tabular data - raise special error to route to document analysis
+        raise ValueError("PDF_DOCUMENT")
+    elif extension in ["txt"]:
+        # TXT files are not tabular data - raise special error to route to text analysis
+        raise ValueError("TEXT_DOCUMENT")
     else:
         raise ValueError(f"Unsupported file format: {extension}")
 
@@ -435,6 +558,79 @@ async def analyze_themes(file: UploadFile = File(...)):
         },
         rigor_warnings=warnings,
     )
+
+
+# PDF document analysis
+class PDFSummary(BaseModel):
+    filename: str
+    pages: int
+    text_length: int
+    text_preview: str
+    file_type: str = "pdf"
+
+
+@app.post("/analyze/pdf", response_model=PDFSummary)
+async def analyze_pdf(file: UploadFile = File(...)):
+    """Extract text from a PDF document for analysis."""
+    content = await file.read()
+    filename = file.filename or "document.pdf"
+
+    try:
+        import pdfplumber
+        from io import BytesIO
+
+        buffer = BytesIO(content)
+        text_parts = []
+        page_count = 0
+
+        with pdfplumber.open(buffer) as pdf:
+            page_count = len(pdf.pages)
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(page_text)
+
+        full_text = "\n\n".join(text_parts)
+
+        # Create a preview (first 500 characters)
+        preview = full_text[:500] + "..." if len(full_text) > 500 else full_text
+
+        return PDFSummary(
+            filename=filename,
+            pages=page_count,
+            text_length=len(full_text),
+            text_preview=preview,
+        )
+    except ImportError:
+        # Fallback to basic PDF parsing if pdfplumber not available
+        try:
+            import fitz  # PyMuPDF
+            from io import BytesIO
+
+            buffer = BytesIO(content)
+            doc = fitz.open(stream=buffer, filetype="pdf")
+            page_count = len(doc)
+            text_parts = []
+
+            for page in doc:
+                text_parts.append(page.get_text())
+
+            full_text = "\n\n".join(text_parts)
+            preview = full_text[:500] + "..." if len(full_text) > 500 else full_text
+
+            return PDFSummary(
+                filename=filename,
+                pages=page_count,
+                text_length=len(full_text),
+                text_preview=preview,
+            )
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="PDF parsing libraries not available. Please install pdfplumber or PyMuPDF."
+            )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse PDF: {str(e)}")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ const openingPrompts: Record<string, string> = {
 
 export default function ConversationPage() {
   const router = useRouter();
-  const { session, addMessage, updateSettings, addFile, addAnalysis, addLiterature } = useSession();
+  const { session, addMessage, updateSettings, addFile, addAnalysis, addLiterature, addArtifact } = useSession();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -38,6 +38,10 @@ export default function ConversationPage() {
   const [isSearchingLiterature, setIsSearchingLiterature] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showOutputModal, setShowOutputModal] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedOutput, setGeneratedOutput] = useState<{ content: string; type: string } | null>(null);
+  const [selectedOutputType, setSelectedOutputType] = useState<"statement" | "introduction" | "brief">("statement");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -406,9 +410,15 @@ export default function ConversationPage() {
           `- **${p.title}** (${p.authors.slice(0, 2).join(", ")}${p.authors.length > 2 ? " et al." : ""}, ${p.year})${p.isCrossDisciplinary ? ` [${p.discipline}]` : ""}`
         ).join("\n");
 
+        // Check for cross-disciplinary papers
+        const crossDisciplinaryPapers = data.papers.filter((p: { isCrossDisciplinary?: boolean }) => p.isCrossDisciplinary);
+        const crossDisciplinaryNote = crossDisciplinaryPapers.length > 0
+          ? `\n\nI've flagged ${crossDisciplinaryPapers.length} papers from adjacent disciplines that might offer fresh theoretical perspectives.`
+          : "";
+
         addMessage({
           role: "assistant",
-          content: `I found ${data.papers.length} relevant papers for "${query}":\n\n${papersList}\n\nHow do these relate to your research direction? Are there any papers here that surprise you or challenge your thinking?`,
+          content: `I found ${data.papers.length} relevant papers for "${query}":\n\n${papersList}${crossDisciplinaryNote}\n\nThese papers seem to address similar themes. **How is your angle different?** What specific contribution would your research make beyond what's already been studied?\n\nAre there any papers here that surprise you or challenge your thinking?`,
           metadata: { phase: "literature", literatureTriggered: true },
         });
       } else {
@@ -429,8 +439,62 @@ export default function ConversationPage() {
   };
 
   const handleGenerateOutput = () => {
-    // TODO: Implement output generation
-    console.log("Generate output clicked");
+    setShowOutputModal(true);
+    setGeneratedOutput(null);
+  };
+
+  const executeGenerateOutput = async (outputType: "statement" | "introduction" | "brief") => {
+    setIsGenerating(true);
+    setSelectedOutputType(outputType);
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          outputType,
+          messages: session.messages,
+          literatureFindings: session.literatureFindings,
+          analysisResults: session.analysisResults,
+          subfield: session.subfield,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to generate output");
+      }
+
+      setGeneratedOutput({
+        content: data.content,
+        type: outputType,
+      });
+
+      // Also add as an artifact to the session
+      addArtifact({
+        type: outputType,
+        content: data.content,
+        version: 1,
+      });
+    } catch (error) {
+      console.error("Generate output error:", error);
+      setGeneratedOutput({
+        content: "Failed to generate output. Please try again.",
+        type: "error",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      // Could add a toast notification here
+    } catch (error) {
+      console.error("Copy failed:", error);
+    }
   };
 
   return (
@@ -561,6 +625,126 @@ export default function ConversationPage() {
               >
                 Search
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Output generation modal */}
+      {showOutputModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col">
+            {/* Modal header */}
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-800">Generate Output</h3>
+                <button
+                  onClick={() => setShowOutputModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {!generatedOutput && (
+                <p className="text-sm text-gray-600 mt-2">
+                  Choose the type of output you&apos;d like to generate from your conversation.
+                </p>
+              )}
+            </div>
+
+            {/* Modal content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {!generatedOutput && !isGenerating && (
+                <div className="grid gap-4">
+                  {/* Puzzle Statement option */}
+                  <button
+                    onClick={() => executeGenerateOutput("statement")}
+                    className="text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                  >
+                    <h4 className="font-semibold text-gray-800 mb-1">Puzzle Statement</h4>
+                    <p className="text-sm text-gray-600">
+                      A polished 1-2 paragraph statement ready for your paper introduction.
+                    </p>
+                  </button>
+
+                  {/* Introduction Draft option */}
+                  <button
+                    onClick={() => executeGenerateOutput("introduction")}
+                    className="text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                  >
+                    <h4 className="font-semibold text-gray-800 mb-1">Introduction Draft</h4>
+                    <p className="text-sm text-gray-600">
+                      A 2-3 page introduction draft with literature review and framing.
+                    </p>
+                  </button>
+
+                  {/* Research Brief option */}
+                  <button
+                    onClick={() => executeGenerateOutput("brief")}
+                    className="text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                  >
+                    <h4 className="font-semibold text-gray-800 mb-1">Research Brief</h4>
+                    <p className="text-sm text-gray-600">
+                      A comprehensive 5-section document with puzzle, significance, literature, evidence needed, and approach.
+                    </p>
+                  </button>
+                </div>
+              )}
+
+              {isGenerating && (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 text-primary animate-spin mb-4" />
+                  <p className="text-gray-600">Generating your {selectedOutputType === "statement" ? "puzzle statement" : selectedOutputType === "introduction" ? "introduction draft" : "research brief"}...</p>
+                </div>
+              )}
+
+              {generatedOutput && !isGenerating && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-800 capitalize">
+                      {generatedOutput.type === "statement" ? "Puzzle Statement" :
+                       generatedOutput.type === "introduction" ? "Introduction Draft" :
+                       generatedOutput.type === "brief" ? "Research Brief" : "Output"}
+                    </h4>
+                    <button
+                      onClick={() => copyToClipboard(generatedOutput.content)}
+                      className="text-sm text-primary hover:text-primary-800 transition-colors"
+                    >
+                      Copy to clipboard
+                    </button>
+                  </div>
+                  <div className="prose prose-sm max-w-none bg-gray-50 rounded-lg p-4 border border-gray-200 whitespace-pre-wrap">
+                    {generatedOutput.content}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal footer */}
+            <div className="p-6 border-t border-gray-200 flex justify-between">
+              {generatedOutput && !isGenerating ? (
+                <>
+                  <button
+                    onClick={() => setGeneratedOutput(null)}
+                    className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Generate Another
+                  </button>
+                  <button
+                    onClick={() => setShowOutputModal(false)}
+                    className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary-800 transition-colors"
+                  >
+                    Done
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setShowOutputModal(false)}
+                  className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors ml-auto"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
         </div>

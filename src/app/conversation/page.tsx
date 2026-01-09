@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/context/SessionContext";
-import { cn, formatTimestamp } from "@/lib/utils";
+import { cn, formatTimestamp, fetchWithTimeout, retryWithBackoff } from "@/lib/utils";
 import type { Message, AnalysisResult } from "@/types";
 import {
   Send,
@@ -35,7 +35,23 @@ export default function ConversationPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [isContextPanelOpen, setIsContextPanelOpen] = useState(true);
+  const [isContextPanelOpen, setIsContextPanelOpen] = useState(false); // Default closed on mobile
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Check if mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+      // Auto-open panel on desktop, keep closed on mobile
+      if (window.innerWidth >= 768) {
+        setIsContextPanelOpen(true);
+      }
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   const [showSettings, setShowSettings] = useState(false);
   const [isSearchingLiterature, setIsSearchingLiterature] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -84,31 +100,62 @@ export default function ConversationPage() {
     });
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...session.messages, { role: "user", content: userMessage }],
-          settings: session.settings,
-          currentPhase: session.currentPhase,
-          subfield: session.subfield,
-          analysisContext: session.analysisResults,
-          literatureContext: session.literatureFindings,
-        }),
-      });
+      // Use retry with exponential backoff for LLM calls
+      const data = await retryWithBackoff(
+        async () => {
+          const response = await fetchWithTimeout("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: [...session.messages, { role: "user", content: userMessage }],
+              settings: session.settings,
+              currentPhase: session.currentPhase,
+              subfield: session.subfield,
+              analysisContext: session.analysisResults,
+              literatureContext: session.literatureFindings,
+            }),
+            timeout: 60000, // 60 second timeout for LLM calls
+          });
 
-      if (!response.ok) {
-        throw new Error("Failed to get response");
-      }
+          if (!response.ok) {
+            throw new Error("Failed to get response");
+          }
 
-      const data = await response.json();
+          return response.json();
+        },
+        {
+          maxRetries: 2,
+          initialDelay: 1000,
+          maxDelay: 5000,
+          shouldRetry: (error) => {
+            // Retry on timeout (AbortError) or server errors
+            if (error instanceof Error) {
+              return error.name === 'AbortError' || error.message.includes('timeout');
+            }
+            return false;
+          },
+        }
+      );
+
       addMessage(data.message);
     } catch (error) {
       console.error("Chat error:", error);
+      // Determine if this is a timeout error
+      const isTimeoutError = error instanceof Error && (error.name === 'AbortError' || error.message.includes('timeout'));
+      const isNetworkError = error instanceof TypeError && error.message.includes('fetch');
+
+      let errorMessage: string;
+      if (isTimeoutError) {
+        errorMessage = "The request took too long and timed out. The server might be busy. Please try again in a moment. Your conversation context is preserved.";
+      } else if (isNetworkError) {
+        errorMessage = "Unable to connect to the server. Please check your internet connection and try again.";
+      } else {
+        errorMessage = "I apologize, but I encountered an error processing your message. Please try again.";
+      }
+
       addMessage({
         role: "assistant",
-        content:
-          "I apologize, but I encountered an error processing your message. Please try again.",
+        content: errorMessage,
       });
     } finally {
       setIsLoading(false);
@@ -247,7 +294,12 @@ export default function ConversationPage() {
       }
     } catch (error) {
       console.error("Upload error:", error);
-      setUploadError(error instanceof Error ? error.message : "Failed to upload file");
+      const isNetworkError = error instanceof TypeError && error.message.includes('fetch');
+      setUploadError(
+        isNetworkError
+          ? "Unable to connect to the server. Please check your internet connection and try again."
+          : (error instanceof Error ? error.message : "Failed to upload file")
+      );
     } finally {
       setIsUploading(false);
       // Reset file input
@@ -435,9 +487,12 @@ export default function ConversationPage() {
       }
     } catch (error) {
       console.error("Literature search error:", error);
+      const isNetworkError = error instanceof TypeError && error.message.includes('fetch');
       addMessage({
         role: "assistant",
-        content: "I encountered an error searching the literature. Please try again in a moment.",
+        content: isNetworkError
+          ? "Unable to connect to the server. Please check your internet connection and try again."
+          : "I encountered an error searching the literature. Please try again in a moment.",
       });
     } finally {
       setIsSearchingLiterature(false);
@@ -1091,12 +1146,14 @@ export default function ConversationPage() {
       )}
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Conversation area */}
         <div
           className={cn(
             "flex-1 flex flex-col transition-all duration-300",
-            isContextPanelOpen ? "mr-80" : ""
+            // On desktop, add margin when panel is open
+            // On mobile, no margin needed since panel overlays
+            !isMobile && isContextPanelOpen ? "md:mr-80" : ""
           )}
         >
           {/* Messages */}
@@ -1223,31 +1280,86 @@ export default function ConversationPage() {
           </div>
         </div>
 
-        {/* Context panel toggle */}
-        <button
-          onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
-          className={cn(
-            "fixed right-0 top-1/2 -translate-y-1/2 z-10",
-            "bg-white border border-gray-200 rounded-l-lg p-2 shadow-sm",
-            "hover:bg-gray-50 transition-colors",
-            isContextPanelOpen ? "right-80" : "right-0"
-          )}
-        >
-          {isContextPanelOpen ? (
-            <ChevronRight className="h-5 w-5 text-gray-600" />
-          ) : (
-            <ChevronLeft className="h-5 w-5 text-gray-600" />
-          )}
-        </button>
+        {/* Context panel toggle - Desktop: side toggle, Mobile: bottom button */}
+        {isMobile ? (
+          <button
+            onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
+            className={cn(
+              "fixed bottom-24 right-4 z-20",
+              "bg-primary text-white rounded-full p-3 shadow-lg",
+              "hover:bg-primary-800 transition-colors",
+              "flex items-center justify-center"
+            )}
+            aria-label={isContextPanelOpen ? "Close context panel" : "Open context panel"}
+          >
+            {isContextPanelOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <ChevronLeft className="h-5 w-5" />
+            )}
+          </button>
+        ) : (
+          <button
+            onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
+            className={cn(
+              "fixed right-0 top-1/2 -translate-y-1/2 z-10",
+              "bg-white border border-gray-200 rounded-l-lg p-2 shadow-sm",
+              "hover:bg-gray-50 transition-colors",
+              isContextPanelOpen ? "right-80" : "right-0"
+            )}
+            aria-label={isContextPanelOpen ? "Close context panel" : "Open context panel"}
+          >
+            {isContextPanelOpen ? (
+              <ChevronRight className="h-5 w-5 text-gray-600" />
+            ) : (
+              <ChevronLeft className="h-5 w-5 text-gray-600" />
+            )}
+          </button>
+        )}
 
-        {/* Context panel */}
+        {/* Mobile backdrop overlay */}
+        {isMobile && isContextPanelOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-30"
+            onClick={() => setIsContextPanelOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+
+        {/* Context panel - Bottom sheet on mobile, side panel on desktop */}
         <aside
           className={cn(
-            "fixed right-0 top-[57px] bottom-0 w-80 bg-white border-l border-gray-200",
-            "overflow-y-auto transition-transform duration-300",
-            isContextPanelOpen ? "translate-x-0" : "translate-x-full"
+            "fixed bg-white z-40 overflow-y-auto transition-transform duration-300",
+            isMobile
+              ? // Mobile: bottom sheet
+                cn(
+                  "left-0 right-0 bottom-0 h-[70vh] rounded-t-2xl border-t border-gray-200 shadow-xl",
+                  isContextPanelOpen ? "translate-y-0" : "translate-y-full"
+                )
+              : // Desktop: side panel
+                cn(
+                  "right-0 top-[57px] bottom-0 w-80 border-l border-gray-200",
+                  isContextPanelOpen ? "translate-x-0" : "translate-x-full"
+                )
           )}
         >
+          {/* Mobile drag handle */}
+          {isMobile && (
+            <div className="sticky top-0 bg-white pt-3 pb-2 px-4 border-b border-gray-100">
+              <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-800">Context</h2>
+                <button
+                  onClick={() => setIsContextPanelOpen(false)}
+                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors rounded-full hover:bg-gray-100"
+                  aria-label="Close panel"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="p-4 space-y-6">
             {/* Uploaded files */}
             <section>

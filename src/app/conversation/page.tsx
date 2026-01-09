@@ -46,6 +46,8 @@ export default function ConversationPage() {
   const [selectedOutputType, setSelectedOutputType] = useState<"statement" | "introduction" | "brief">("statement");
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [selectedFileDetails, setSelectedFileDetails] = useState<{ id: string; name: string; type: string; size: number; uploadedAt: string; summary?: string } | null>(null);
+  const [selectedPaperDetails, setSelectedPaperDetails] = useState<{ id: string; title: string; authors: string[]; year: number; abstract?: string; url?: string; citationCount?: number; isCrossDisciplinary: boolean; discipline?: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -945,6 +947,149 @@ export default function ConversationPage() {
         </div>
       )}
 
+      {/* File Details Modal */}
+      {selectedFileDetails && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary-600" />
+                File Details
+              </h2>
+              <button
+                onClick={() => setSelectedFileDetails(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">File Name</label>
+                <p className="text-gray-800 font-medium mt-1">{selectedFileDetails.name}</p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Type</label>
+                <p className="text-gray-800 mt-1">{selectedFileDetails.type}</p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Size</label>
+                <p className="text-gray-800 mt-1">
+                  {selectedFileDetails.size < 1024
+                    ? `${selectedFileDetails.size} bytes`
+                    : selectedFileDetails.size < 1024 * 1024
+                    ? `${(selectedFileDetails.size / 1024).toFixed(1)} KB`
+                    : `${(selectedFileDetails.size / (1024 * 1024)).toFixed(1)} MB`
+                  }
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Uploaded At</label>
+                <p className="text-gray-800 mt-1">{new Date(selectedFileDetails.uploadedAt).toLocaleString()}</p>
+              </div>
+
+              {selectedFileDetails.summary && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Summary</label>
+                  <p className="text-gray-700 mt-1 text-sm">{selectedFileDetails.summary}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setSelectedFileDetails(null)}
+                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Paper Details Modal */}
+      {selectedPaperDetails && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 pr-4">
+                <BookOpen className="h-5 w-5 text-primary-600 flex-shrink-0" />
+                Paper Details
+              </h2>
+              <button
+                onClick={() => setSelectedPaperDetails(null)}
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Title</label>
+                <p className="text-gray-800 font-medium mt-1 leading-snug">{selectedPaperDetails.title}</p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Authors</label>
+                <p className="text-gray-800 mt-1">{selectedPaperDetails.authors.join(", ")}</p>
+              </div>
+
+              <div className="flex gap-6">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Year</label>
+                  <p className="text-gray-800 mt-1">{selectedPaperDetails.year}</p>
+                </div>
+                {selectedPaperDetails.citationCount !== undefined && (
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Citations</label>
+                    <p className="text-gray-800 mt-1">{selectedPaperDetails.citationCount.toLocaleString()}</p>
+                  </div>
+                )}
+              </div>
+
+              {selectedPaperDetails.isCrossDisciplinary && selectedPaperDetails.discipline && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Discipline</label>
+                  <p className="text-primary-700 mt-1 font-medium">📚 {selectedPaperDetails.discipline} (Cross-disciplinary)</p>
+                </div>
+              )}
+
+              {selectedPaperDetails.abstract && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Abstract</label>
+                  <p className="text-gray-700 mt-1 text-sm leading-relaxed">{selectedPaperDetails.abstract}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-between items-center">
+              {selectedPaperDetails.url && (
+                <a
+                  href={selectedPaperDetails.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
+                >
+                  View on Semantic Scholar
+                </a>
+              )}
+              <button
+                onClick={() => setSelectedPaperDetails(null)}
+                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors ml-auto"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Conversation area */}
@@ -1116,7 +1261,16 @@ export default function ConversationPage() {
                   {session.uploadedFiles.map((file) => (
                     <li
                       key={file.id}
-                      className="text-sm bg-gray-50 rounded-lg p-3"
+                      className="text-sm bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                      onClick={() => setSelectedFileDetails(file)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedFileDetails(file);
+                        }
+                      }}
                     >
                       <div className="font-medium text-gray-700 truncate">
                         {file.name}
@@ -1244,9 +1398,18 @@ export default function ConversationPage() {
                   {session.literatureFindings.map((paper) => (
                     <li
                       key={paper.id}
-                      className="text-sm bg-gray-50 rounded-lg p-3"
+                      className="text-sm bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                      onClick={() => setSelectedPaperDetails(paper)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedPaperDetails(paper);
+                        }
+                      }}
                     >
-                      <div className="font-medium text-gray-700 leading-snug">
+                      <div className="font-medium text-gray-700 leading-snug hover:text-primary-700">
                         {paper.title}
                       </div>
                       <div className="text-xs text-gray-500 mt-1">

@@ -1548,7 +1548,7 @@ export default function ConversationPage() {
                               <span className="font-medium">{v.name}</span>
                               <span className="text-gray-400"> ({v.dtype})</span>
                               {v.mean !== undefined && v.mean !== null && (
-                                <div className="pl-2">
+                                <div className="pl-2 font-mono">
                                   Mean: {v.mean.toFixed(2)},
                                   Std: {v.std?.toFixed(2) || 'N/A'},
                                   Med: {v.median?.toFixed(2) || 'N/A'}
@@ -1571,7 +1571,7 @@ export default function ConversationPage() {
                         <div className="mt-2 space-y-1">
                           <div className="text-xs font-medium text-gray-600">Outliers Detected:</div>
                           {(result.details.anomalies as Array<{variable: string; outlier_count: number; outlier_percentage: number}>).map((a, i) => (
-                            <div key={i} className="text-xs text-orange-600 pl-2 border-l-2 border-orange-200">
+                            <div key={i} className="text-xs text-orange-600 pl-2 border-l-2 border-orange-200 font-mono">
                               <span className="font-medium">{a.variable}</span>: {a.outlier_count} outliers ({a.outlier_percentage.toFixed(1)}%)
                             </div>
                           ))}

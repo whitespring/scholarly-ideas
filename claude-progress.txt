@@ -848,3 +848,163 @@ All core integration features are working:
 - All tests performed via Playwright browser automation
 - Screenshots saved to `.playwright-mcp/` directory
 - Mock mode working well for testing without API keys
+
+---
+
+## Session 12: PDF Features & Rate Limiting (2026-01-09)
+
+### Completed Tasks
+
+#### 1. PDF Document Upload (#17) ✅
+- Created test PDF file using jsPDF (research_notes.pdf)
+- Initially failed with "Unsupported file format: pdf"
+- Updated `/src/app/api/upload/route.ts` to handle PDFs directly using `pdf-parse` library
+- PDF upload now works without requiring Python service
+- Returns: filename, pages, text_preview, text_length
+- Successfully uploaded and processed PDF in browser
+
+#### 2. Export Outputs as PDF (#28) ✅
+- Implemented `handleExportOutputsPDF()` function in conversation page
+- Added PDF Format button to "Export Outputs Only" section in export modal
+- PDF includes:
+  - "Scholarly Ideas" title and "Generated Outputs" subtitle
+  - Export timestamp
+  - Each output with type label and version number
+  - Professional typography with page footers
+- Successfully downloaded PDF with puzzle statement content
+
+#### 3. PDF Export Formatting (#120) - Previously Completed ✅
+- Already implemented full session PDF export
+- Verified professional formatting with jsPDF
+
+#### 4. Import Handles Old Session Format (#122) - Previously Completed ✅
+- Fixed SessionContext IMPORT_SESSION reducer
+- Provides defaults for missing fields from old session formats
+
+#### 5. PDF Export Styling (#143) - Previously Completed ✅
+- Verified professional styling in PDF exports
+
+#### 6. Rate Limiting on LLM API Calls (#56) ✅
+- Created `/src/lib/rate-limit.ts` with sliding window rate limiter
+- Implements `checkRateLimit()` and `getClientIdentifier()` functions
+- Default config: 20 requests per minute for chat endpoint
+- Added rate limiting to `/src/app/api/chat/route.ts`:
+  - Returns 429 Too Many Requests when limit exceeded
+  - User-friendly message with seconds to wait
+  - Includes Retry-After header
+- Updated conversation page to handle rate limit errors:
+  - Detects 429 responses
+  - Shows clear message: "You're sending messages too quickly"
+  - Does not retry rate-limited requests
+- Tested by temporarily setting 3 requests/30 seconds limit
+- Verified: 4th message triggered rate limit, waited 15s, then able to continue
+
+### Technical Implementation
+
+#### New File: `/src/lib/rate-limit.ts`
+```typescript
+// Simple in-memory rate limiter with sliding window
+export function checkRateLimit(identifier: string, config: RateLimitConfig): RateLimitResult
+export function getClientIdentifier(request: Request): string
+export const RATE_LIMITS = {
+  chat: { maxRequests: 20, windowMs: 60000 },
+  generate: { maxRequests: 10, windowMs: 60000 },
+  literature: { maxRequests: 15, windowMs: 60000 },
+  upload: { maxRequests: 30, windowMs: 60000 },
+}
+```
+
+#### Updated `/src/app/api/upload/route.ts`
+- Added direct PDF parsing using `pdf-parse` library
+- No longer requires Python service for PDF files
+- Returns text preview (first 500 chars) and page count
+
+#### Updated `/src/app/conversation/page.tsx`
+- Added `handleExportOutputsPDF()` for outputs-only PDF export
+- Added PDF Format button to export modal
+- Updated error handling to detect and display rate limit errors
+
+### Skipped Features (Blocked)
+The following features require the Python analysis service which is not running:
+- #13: Stata file upload (.dta) - requires pyreadstat
+- #14: SPSS file upload (.sav) - requires pyreadstat
+- #15: R data file upload (.rds/.rda) - requires rdata
+
+The following feature is architecturally incompatible:
+- #153: API endpoint /api/export - Sessions are client-side only, no server-side session storage
+
+### Regression Tests Passed
+- Context panel collapse/expand - works correctly
+
+### Feature Statistics
+- Total: 175
+- Passing: 171
+- In Progress: 0
+- Percentage Complete: **97.7%**
+
+### Remaining Features (4)
+1. **#153**: API endpoint /api/export - Architecturally incompatible (client-side only)
+2. **#13**: Stata file upload - Requires Python service
+3. **#14**: SPSS file upload - Requires Python service
+4. **#15**: R data file upload - Requires Python service
+
+### Notes
+- Server running on port 3000
+- PDF parsing handled directly in Next.js API route using pdf-parse
+- Rate limiting uses in-memory store (resets on server restart)
+- Python analysis service not available for specialized file formats
+
+---
+
+## Session 13: API Export Endpoint Implementation (2026-01-09)
+
+### Completed Tasks
+
+#### 1. API endpoint /api/export (#153) ✅
+- Created `/src/app/api/export/route.ts` with both GET and POST handlers
+- GET returns usage instructions (since sessions are client-side)
+- POST accepts session data and returns formatted export:
+  - JSON format: Returns session data with `exportedAt` and `version` fields
+  - PDF format: Generates professional PDF with session content
+  - `outputsOnly` option: Export only puzzle artifacts
+- Verified with curl commands:
+  - GET returns usage info
+  - POST with JSON format returns proper session JSON
+  - POST with PDF format generates valid PDF file (%PDF-1.3 header)
+
+### Technical Implementation
+
+#### New File: `/src/app/api/export/route.ts`
+```typescript
+// GET - Returns usage instructions
+// POST - Accepts session data, returns JSON or PDF export
+// Parameters:
+//   session: SessionData (required)
+//   format: "json" | "pdf" (default: "json")
+//   outputsOnly: boolean (default: false)
+```
+
+### Regression Tests Passed
+- Feature #88: Submit button disabled during processing - verified
+- App loads correctly at http://localhost:3000
+- Conversation flow works end-to-end
+
+### Feature Statistics
+- Total: 175
+- Passing: 172
+- In Progress: 0
+- Percentage Complete: **98.3%**
+
+### Remaining Features (3) - All External Blockers
+1. **#13**: Stata file upload - Requires Python service with pyreadstat
+2. **#14**: SPSS file upload - Requires Python service with pyreadstat
+3. **#15**: R data file upload - Requires Python service with rdata
+
+These features cannot be implemented without:
+- Starting the Python analysis service (uvicorn)
+- Installing Python dependencies (pyreadstat, rdata, pandas, etc.)
+
+### Notes
+- Server running on port 3000
+- Export API allows programmatic access to session export functionality
+- All other features (172/175) are passing and verified

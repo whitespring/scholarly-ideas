@@ -687,3 +687,62 @@ setSuccessMessage("Outputs exported successfully!");
 2. Remaining UI polish and accessibility features
 3. Performance optimization features
 4. Consider implementing PDF export (#28 - still skipped)
+
+---
+
+## Session 10: Teach Me & Be Direct Modes + Phase Tracking (2026-01-09)
+
+### Completed Tasks
+
+#### 1. Session ID Uniqueness (#164) ✅
+- Verified session IDs are generated using `crypto.randomUUID()` (UUID v4)
+- Started two sessions, exported both, confirmed different unique IDs
+- First session: `b0b8241e-ecbc-40f0-aa74-4541c1786dd5`
+- Second session: `ab907a38-8890-4722-b2b1-ee2c7337b89e`
+- Both validated as proper UUID v4 format
+
+#### 2. Teach Me Mode Educational Content (#165) ✅
+- Implemented Teach Me mode handling in mock response function
+- When gap-spotting detected with Teach Me enabled:
+  - Shows "🎓 Teaching Moment: This is 'Gap-Spotting'" header
+  - Explains what gap-spotting is and why it's risky
+  - Provides real paper example (good vs. weak framing)
+  - Offers "Want to learn more?" section with Zuckerman's framework
+  - References specific academic concepts and debates
+
+#### 3. Be Direct Mode Feedback (#166) ✅
+- Implemented Be Direct mode handling in mock response function
+- When gap-spotting detected with Be Direct enabled:
+  - Opens with "Let me be direct with you: This is gap-spotting..."
+  - Immediately labels the issue as "a weak foundation for research"
+  - Lists problems directly without gentle preambles
+  - Challenges user with "My Direct Question:" section
+  - Contrasts clearly with gentle probing in default mode
+
+#### 4. Phase Tracking in Conversation (#167) ✅
+- Verified conversation phases are tracked in session state
+- Phases tracked: opening, probing, literature, diagnosis, articulation, output
+- Each message includes phase metadata (e.g., `"phase": "opening"`)
+- Phase transitions logged (e.g., literature search triggers "literature" phase)
+- Session exports include `currentPhase` field
+
+### Technical Changes
+
+#### Updated `/src/app/api/chat/route.ts`:
+- Added `settings` parameter to `generateMockResponse()` function
+- Added Teach Me mode response for gap-spotting with educational content
+- Added Be Direct mode response for gap-spotting with candid feedback
+- Kept default gentle probing response for neither mode
+- Updated function call to pass settings object
+
+### Feature Statistics
+- Total: 175
+- Passing: 155
+- In Progress: 0
+- Percentage Complete: 88.6%
+
+### Next Steps for Future Agents
+1. Continue with feature #168 onwards
+2. Remaining features are likely edge cases and polish
+3. Consider implementing PDF export (#28 - still skipped)
+4. Getting close to completion - ~20 features remaining

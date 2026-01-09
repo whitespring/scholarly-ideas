@@ -1433,3 +1433,57 @@ The Scholarly Ideas application remains fully complete and production-ready.
 - Default settings verification: `.playwright-mcp/regression-session20-defaults.png`
 - Error message styling: `.playwright-mcp/regression-session20-error-styling.png`
 - Data planning workflow: `.playwright-mcp/regression-session20-data-planning.png`
+
+---
+
+## Session 21: Verification & Regression Testing (2026-01-09)
+
+### Session Summary
+This session verified that all 175 features remain passing with comprehensive regression testing.
+
+### Tasks Completed
+
+#### 1. Server Status Check ✅
+- Next.js server running on port 3000
+- Python analysis service running on port 8000
+- Both services responding correctly
+
+#### 2. Regression Testing ✅
+Ran regression tests on 3 random passing features:
+
+| Feature | Name | Status |
+|---------|------|--------|
+| #168 | Subfield context affects conversation | ✅ PASSED |
+| #8 | Conversation history scrolling | ✅ PASSED |
+| #82 | Unsaved changes warning | ✅ PASSED |
+
+All tests verified:
+- Selected Strategy subfield, conversation received Strategy-relevant papers
+- Literature search returned Strategy papers: Porter (1987), Teece et al. (1997), Khanna/Palepu (1997)
+- Cross-disciplinary flag (📚 Economics) shown for Economics paper
+- "How is your angle different?" prompt displayed
+- Long conversation history (8+ messages) is scrollable
+- Scroll to top shows opening prompt and first messages
+- Newest messages visible by default at bottom
+- Clicking "Scholarly Ideas" home button with unsaved work triggers warning modal
+- Modal shows: "Export First", "Leave Without Saving", "Cancel" options
+- Warning only appears when there's actual user work to save
+
+#### 3. Feature Status Confirmation ✅
+- All 175 features passing (100% completion)
+- No features in progress
+- No new features to implement
+
+### Feature Statistics
+- **Total**: 175
+- **Passing**: 175 ✅
+- **In Progress**: 0
+- **Percentage Complete**: **100.0%** 🎉
+
+### Application Status
+The Scholarly Ideas application remains fully complete and production-ready.
+
+### Screenshots
+- Conversation history: `.playwright-mcp/regression-session21-conversation-history.png`
+- Scroll to top: `.playwright-mcp/regression-session21-scroll-top.png`
+- Unsaved changes warning: `.playwright-mcp/regression-session21-unsaved-warning.png`

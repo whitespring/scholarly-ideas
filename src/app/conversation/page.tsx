@@ -65,6 +65,7 @@ export default function ConversationPage() {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [selectedFileDetails, setSelectedFileDetails] = useState<{ id: string; name: string; type: string; size: number; uploadedAt: string; summary?: string } | null>(null);
   const [selectedPaperDetails, setSelectedPaperDetails] = useState<{ id: string; title: string; authors: string[]; year: number; abstract?: string; url?: string; citationCount?: number; isCrossDisciplinary: boolean; discipline?: string } | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +109,16 @@ export default function ConversationPage() {
       router.push('/');
     }
   }, [hasUnsavedChanges, router]);
+
+  // Auto-dismiss success message after 3 seconds
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => {
+        setSuccessMessage(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -614,6 +625,7 @@ export default function ConversationPage() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     setShowExportModal(false);
+    setSuccessMessage("Session exported successfully!");
   };
 
   const handleExportOutputsOnly = () => {
@@ -632,6 +644,7 @@ export default function ConversationPage() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     setShowExportModal(false);
+    setSuccessMessage("Outputs exported successfully!");
   };
 
   const handleImportSession = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -670,6 +683,23 @@ export default function ConversationPage() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
+      {/* Success Toast */}
+      {successMessage && (
+        <div className="fixed top-4 right-4 z-50 animate-fade-in">
+          <div className="bg-green-50 border border-green-500 text-green-700 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
+            <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-medium">{successMessage}</span>
+            <button
+              onClick={() => setSuccessMessage(null)}
+              className="text-green-500 hover:text-green-700 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <header className="border-b border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">

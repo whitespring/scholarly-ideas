@@ -134,9 +134,9 @@ scholarly-ideas/
 
 ### Feature Statistics
 - Total: 175
-- Passing: 20
+- Passing: 22
 - In Progress: 0
-- Percentage Complete: 11.4%
+- Percentage Complete: 12.6%
 
 ---
 
@@ -170,11 +170,29 @@ scholarly-ideas/
 - Output generation uses sample outputs when Claude API key not configured
 - All three output types generate substantive, academically appropriate content
 
+#### 4. Export/Import Session ✅
+- Added Export button in header with modal
+- Export full conversation as JSON (all messages, settings, metadata)
+- Export outputs only (artifacts) when available
+- Added Import button with file picker
+- Import restores full session state with "Welcome back" summary
+- User can continue conversation after import
+
+#### 5. Features Completed This Session
+- #23: Literature novelty check
+- #24: Generate puzzle statement
+- #25: Generate introduction draft
+- #26: Generate research brief
+- #27: Export session as JSON
+- #29: Import previous session
+- (Skipped #28: Export outputs as PDF - requires additional implementation)
+
 ### Next Steps for Future Agents
-1. Continue with feature #27 onwards (likely export/import functionality)
-2. Consider adding real Semantic Scholar API key for production testing
-3. May need to implement session export/import JSON functionality
+1. Continue with feature #30 onwards
+2. May need PDF export implementation (#28)
+3. Consider adding real Semantic Scholar API key for production testing
 4. Review and test error handling features
+5. Responsive design and accessibility features
 
 ### Notes for Subsequent Agents
 - The features database is in `features.db` (SQLite)

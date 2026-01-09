@@ -28,13 +28,16 @@ const openingPrompts: Record<string, string> = {
 
 export default function ConversationPage() {
   const router = useRouter();
-  const { session, addMessage, updateSettings, addFile, addAnalysis } = useSession();
+  const { session, addMessage, updateSettings, addFile, addAnalysis, addLiterature } = useSession();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [isSearchingLiterature, setIsSearchingLiterature] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -120,7 +123,33 @@ export default function ConversationPage() {
     setIsUploading(true);
     setUploadError(null);
 
+    // Read file content as base64 for later analysis
+    const readFileAsBase64 = (): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64 = result.split(",")[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    };
+
     try {
+      // Read file content first
+      const fileBase64 = await readFileAsBase64();
+      const fileName = file.name;
+      const fileType = file.type;
+      const extension = fileName.split(".").pop()?.toLowerCase();
+
+      // Handle text files for qualitative analysis
+      if (extension === "txt") {
+        await handleTextFileUpload(file, fileBase64, fileName, fileType);
+        return;
+      }
+
       const formData = new FormData();
       formData.append("file", file);
 
@@ -172,6 +201,40 @@ export default function ConversationPage() {
         metadata: { phase: "probing", analysisTriggered: true },
       });
 
+      // Run anomaly detection automatically if we have numeric data
+      if (numericVars.length > 0) {
+        try {
+          const anomalyResponse = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              analysisType: "anomaly",
+              fileContent: fileBase64,
+              fileName: fileName,
+              fileType: fileType,
+            }),
+          });
+
+          if (anomalyResponse.ok) {
+            const anomalyData = await anomalyResponse.json();
+            if (anomalyData.result) {
+              addAnalysis({
+                type: "anomaly",
+                summary: anomalyData.result.summary,
+                details: anomalyData.result.details,
+                rigorWarnings: (anomalyData.result.rigor_warnings || []).map((w: { type: string; message: string; severity: string }) => ({
+                  type: w.type as "multiple_testing" | "data_dredging" | "sample_size" | "selection_bias",
+                  message: w.message,
+                  severity: w.severity as "low" | "medium" | "high",
+                })),
+              });
+            }
+          }
+        } catch (anomalyError) {
+          console.error("Anomaly analysis error:", anomalyError);
+          // Non-critical, don't show error to user
+        }
+      }
     } catch (error) {
       console.error("Upload error:", error);
       setUploadError(error instanceof Error ? error.message : "Failed to upload file");
@@ -184,9 +247,185 @@ export default function ConversationPage() {
     }
   };
 
+  const handleTextFileUpload = async (file: File, fileBase64: string, fileName: string, fileType: string) => {
+    try {
+      // Add file to session
+      addFile({
+        name: file.name,
+        type: file.type || "text/plain",
+        size: file.size,
+        summary: "Qualitative text data",
+      });
+
+      // Run theme analysis
+      const themeResponse = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          analysisType: "theme",
+          fileContent: fileBase64,
+          fileName: fileName,
+          fileType: fileType || "text/plain",
+        }),
+      });
+
+      let themesList = "";
+      if (themeResponse.ok) {
+        const themeData = await themeResponse.json();
+        if (themeData.result) {
+          addAnalysis({
+            type: "theme",
+            summary: themeData.result.summary,
+            details: themeData.result.details,
+            rigorWarnings: (themeData.result.rigor_warnings || []).map((w: { type: string; message: string; severity: string }) => ({
+              type: w.type as "multiple_testing" | "data_dredging" | "sample_size" | "selection_bias" | "methodology",
+              message: w.message,
+              severity: w.severity as "low" | "medium" | "high",
+            })),
+          });
+
+          // Format themes for the message
+          const themes = themeData.result.details?.themes || [];
+          const topThemes = themes.slice(0, 5);
+          themesList = topThemes.map((t: { theme: string; frequency: number }) =>
+            `- **${t.theme}** (mentioned ${t.frequency} times)`
+          ).join("\n");
+        }
+      }
+
+      // Run quote analysis to find surprising quotes
+      const quoteResponse = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          analysisType: "quote",
+          fileContent: fileBase64,
+          fileName: fileName,
+          fileType: fileType || "text/plain",
+        }),
+      });
+
+      let quotesList = "";
+      if (quoteResponse.ok) {
+        const quoteData = await quoteResponse.json();
+        if (quoteData.result) {
+          addAnalysis({
+            type: "quote",
+            summary: quoteData.result.summary,
+            details: quoteData.result.details,
+            rigorWarnings: (quoteData.result.rigor_warnings || []).map((w: { type: string; message: string; severity: string }) => ({
+              type: w.type as "multiple_testing" | "data_dredging" | "sample_size" | "selection_bias" | "methodology",
+              message: w.message,
+              severity: w.severity as "low" | "medium" | "high",
+            })),
+          });
+
+          // Format quotes for the message
+          const quotes = quoteData.result.details?.quotes || [];
+          if (quotes.length > 0) {
+            quotesList = quotes.slice(0, 3).map((q: { text: string; source: string; type: string }) =>
+              `> "${q.text}" *(${q.source})*`
+            ).join("\n\n");
+          }
+        }
+      }
+
+      // Build the combined message
+      let messageContent = `I've analyzed your qualitative data file "${file.name}".\n\n`;
+
+      if (themesList) {
+        messageContent += `**Theme Analysis:**\n${themesList}\n\n`;
+      }
+
+      if (quotesList) {
+        messageContent += `**Potentially Surprising Quotes:**\n${quotesList}\n\n`;
+      }
+
+      messageContent += "What patterns stood out to you when collecting this data? Do any of these quotes challenge your initial assumptions?";
+
+      addMessage({
+        role: "assistant",
+        content: messageContent,
+        metadata: { phase: "probing", analysisTriggered: true },
+      });
+    } catch (error) {
+      console.error("Text file analysis error:", error);
+      setUploadError(error instanceof Error ? error.message : "Failed to analyze text file");
+    }
+  };
+
   const handleSearchLiterature = () => {
-    // TODO: Implement literature search
-    console.log("Search literature clicked");
+    // Extract a suggested query from recent conversation messages
+    const recentUserMessages = session.messages
+      .filter(m => m.role === "user")
+      .slice(-3)
+      .map(m => m.content)
+      .join(" ");
+
+    // Extract key topics from the conversation
+    const suggestedQuery = recentUserMessages
+      .split(/[.!?,;]+/)
+      .filter(s => s.trim().length > 10)
+      .slice(0, 2)
+      .join(" ")
+      .slice(0, 100)
+      .trim() || "organizational behavior research";
+
+    setSearchQuery(suggestedQuery);
+    setShowSearchModal(true);
+  };
+
+  const executeSearchLiterature = async (query: string) => {
+    if (!query.trim()) return;
+
+    setIsSearchingLiterature(true);
+    setShowSearchModal(false);
+
+    try {
+      const response = await fetch("/api/literature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: query.trim(),
+          subfield: session.subfield,
+          limit: 5,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to search literature");
+      }
+
+      if (data.papers && data.papers.length > 0) {
+        addLiterature(data.papers);
+
+        // Format papers for the message
+        const papersList = data.papers.slice(0, 5).map((p: { title: string; authors: string[]; year: number; isCrossDisciplinary?: boolean; discipline?: string }) =>
+          `- **${p.title}** (${p.authors.slice(0, 2).join(", ")}${p.authors.length > 2 ? " et al." : ""}, ${p.year})${p.isCrossDisciplinary ? ` [${p.discipline}]` : ""}`
+        ).join("\n");
+
+        addMessage({
+          role: "assistant",
+          content: `I found ${data.papers.length} relevant papers for "${query}":\n\n${papersList}\n\nHow do these relate to your research direction? Are there any papers here that surprise you or challenge your thinking?`,
+          metadata: { phase: "literature", literatureTriggered: true },
+        });
+      } else {
+        addMessage({
+          role: "assistant",
+          content: `I couldn't find papers matching "${query}". Try adjusting your search terms or being more specific about the topic you're exploring.`,
+        });
+      }
+    } catch (error) {
+      console.error("Literature search error:", error);
+      addMessage({
+        role: "assistant",
+        content: "I encountered an error searching the literature. Please try again in a moment.",
+      });
+    } finally {
+      setIsSearchingLiterature(false);
+    }
   };
 
   const handleGenerateOutput = () => {
@@ -282,6 +521,51 @@ export default function ConversationPage() {
         </div>
       </header>
 
+      {/* Literature search modal */}
+      {showSearchModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Search Literature</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Enter keywords or a topic to search for relevant academic papers via Semantic Scholar.
+            </p>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  executeSearchLiterature(searchQuery);
+                }
+              }}
+              placeholder="e.g., team conflict performance"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent mb-4"
+              autoFocus
+            />
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowSearchModal(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => executeSearchLiterature(searchQuery)}
+                disabled={!searchQuery.trim()}
+                className={cn(
+                  "px-4 py-2 text-sm rounded-lg transition-colors",
+                  searchQuery.trim()
+                    ? "bg-primary text-white hover:bg-primary-800"
+                    : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                )}
+              >
+                Search
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Conversation area */}
@@ -354,10 +638,20 @@ export default function ConversationPage() {
               </button>
               <button
                 onClick={handleSearchLiterature}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                disabled={isSearchingLiterature}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                  isSearchingLiterature
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    : "text-gray-600 hover:bg-gray-100"
+                )}
               >
-                <BookOpen className="h-4 w-4" />
-                Search Literature
+                {isSearchingLiterature ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <BookOpen className="h-4 w-4" />
+                )}
+                {isSearchingLiterature ? "Searching literature..." : "Search Literature"}
               </button>
               <button
                 onClick={handleGenerateOutput}
@@ -498,6 +792,50 @@ export default function ConversationPage() {
                           {(result.details.variables as Array<unknown>).length > 5 && (
                             <div className="text-xs text-gray-400 pl-2">
                               +{(result.details.variables as Array<unknown>).length - 5} more variables...
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {/* Show anomaly details if available */}
+                      {result.type === "anomaly" && result.details?.anomalies && Array.isArray(result.details.anomalies) && (result.details.anomalies as Array<unknown>).length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          <div className="text-xs font-medium text-gray-600">Outliers Detected:</div>
+                          {(result.details.anomalies as Array<{variable: string; outlier_count: number; outlier_percentage: number}>).map((a, i) => (
+                            <div key={i} className="text-xs text-orange-600 pl-2 border-l-2 border-orange-200">
+                              <span className="font-medium">{a.variable}</span>: {a.outlier_count} outliers ({a.outlier_percentage.toFixed(1)}%)
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Show theme details if available */}
+                      {result.type === "theme" && result.details?.themes && Array.isArray(result.details.themes) && (result.details.themes as Array<unknown>).length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          <div className="text-xs font-medium text-gray-600">Themes Identified:</div>
+                          {(result.details.themes as Array<{theme: string; frequency: number; examples?: string[]}>).map((t, i) => (
+                            <div key={i} className="text-xs text-purple-600 pl-2 border-l-2 border-purple-200">
+                              <span className="font-medium capitalize">{t.theme}</span>: {t.frequency} mentions
+                            </div>
+                          ))}
+                          {result.details.segment_count && (
+                            <div className="text-xs text-gray-400 mt-1">
+                              Analyzed {result.details.segment_count as number} text segments
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {/* Show quote details if available */}
+                      {result.type === "quote" && result.details?.quotes && Array.isArray(result.details.quotes) && (result.details.quotes as Array<unknown>).length > 0 && (
+                        <div className="mt-2 space-y-2">
+                          <div className="text-xs font-medium text-gray-600">Surprising Quotes:</div>
+                          {(result.details.quotes as Array<{text: string; source: string; type: string; context?: string}>).slice(0, 3).map((q, i) => (
+                            <div key={i} className="text-xs text-blue-700 pl-2 border-l-2 border-blue-200 space-y-1">
+                              <div className="italic">&ldquo;{q.text.slice(0, 100)}{q.text.length > 100 ? "..." : ""}&rdquo;</div>
+                              <div className="text-blue-500 text-[10px]">{q.source} &bull; {q.type}</div>
+                            </div>
+                          ))}
+                          {(result.details.quotes as Array<unknown>).length > 3 && (
+                            <div className="text-xs text-gray-400">
+                              +{(result.details.quotes as Array<unknown>).length - 3} more quotes...
                             </div>
                           )}
                         </div>

@@ -341,6 +341,96 @@ async def analyze_correlations(file: UploadFile = File(...)):
     )
 
 
+# Theme analysis for qualitative data
+@app.post("/analyze/theme", response_model=AnalysisResult)
+async def analyze_themes(file: UploadFile = File(...)):
+    """Extract recurring themes from qualitative text data."""
+    content = await file.read()
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Unable to decode text file. Please ensure it's UTF-8 encoded.")
+
+    # Simple theme extraction using word frequency analysis
+    # In production, this could use NLP libraries like spaCy or NLTK
+    import re
+    from collections import Counter
+
+    # Define common themes to look for in organizational research
+    theme_patterns = {
+        "communication": r"\b(communication|communicat\w*|messag\w*|email\w*|meeting\w*|inform\w*)\b",
+        "leadership": r"\b(leader\w*|management|manager\w*|director\w*|executive\w*|decision\w*)\b",
+        "trust": r"\b(trust\w*|distrust\w*|psycholog\w*\s*safety|safe\w*|vulnerab\w*)\b",
+        "conflict": r"\b(conflict\w*|friction|tension\w*|disagree\w*|dispute\w*)\b",
+        "teamwork": r"\b(team\w*|collaborat\w*|cooperat\w*|together\w*|group\w*)\b",
+        "deadlines": r"\b(deadline\w*|timeline\w*|schedule\w*|deliver\w*|due\s*date\w*|miss\w*)\b",
+        "roles": r"\b(role\w*|responsib\w*|accountab\w*|clarif\w*|unclear\w*)\b",
+        "silos": r"\b(silo\w*|department\w*|cross.?functional\w*|coordinat\w*)\b",
+        "culture": r"\b(cultur\w*|norm\w*|value\w*|climate\w*|environment\w*)\b",
+        "performance": r"\b(perform\w*|productiv\w*|efficien\w*|effectiv\w*|outcome\w*)\b",
+    }
+
+    text_lower = text.lower()
+    themes = []
+
+    for theme_name, pattern in theme_patterns.items():
+        matches = re.findall(pattern, text_lower)
+        if matches:
+            themes.append({
+                "theme": theme_name,
+                "frequency": len(matches),
+                "examples": list(set(matches))[:5],  # Up to 5 unique examples
+            })
+
+    # Sort by frequency
+    themes = sorted(themes, key=lambda x: x["frequency"], reverse=True)
+
+    # Also extract the most common words for additional context
+    words = re.findall(r"\b[a-z]{4,}\b", text_lower)
+    # Filter out common stop words
+    stop_words = {"that", "this", "with", "from", "have", "were", "been", "they", "their", "about", "would", "could", "should", "which", "there", "being", "because", "didn", "wasn", "doesn", "people"}
+    words = [w for w in words if w not in stop_words]
+    word_counts = Counter(words).most_common(20)
+
+    warnings = []
+
+    # Add warning about automated theme extraction
+    warnings.append({
+        "type": "methodology",
+        "message": "Themes extracted using pattern matching. For rigorous analysis, consider manual coding with inter-rater reliability.",
+        "severity": "medium",
+    })
+
+    # Count approximate entries/segments
+    segments = text.split("\n\n")
+    segments = [s for s in segments if s.strip()]
+
+    if len(segments) < 5:
+        warnings.append({
+            "type": "sample_size",
+            "message": f"Only {len(segments)} text segments found. Consider whether this represents adequate data saturation.",
+            "severity": "medium",
+        })
+
+    if not themes:
+        summary = "No common themes detected. The text may not contain organizational research-related content."
+    else:
+        top_themes = [t["theme"] for t in themes[:3]]
+        summary = f"Identified {len(themes)} recurring themes across {len(segments)} text segments. Top themes: {', '.join(top_themes)}."
+
+    return AnalysisResult(
+        type="theme",
+        summary=summary,
+        details={
+            "themes": themes,
+            "common_words": [{"word": w, "count": c} for w, c in word_counts],
+            "segment_count": len(segments),
+        },
+        rigor_warnings=warnings,
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -238,3 +238,19 @@ scholarly-ideas/
 - Mock mode provides consistent pseudo-puzzle detection without API key
 - Rigor warnings from Python analysis service include sample_size and multiple_testing
 - Context panel items are now buttons with hover states for better UX
+
+### Session 3 Continued: Action Buttons & E2E Workflows
+
+#### Additional Features Completed
+- #36: Action button: Upload File - file picker opens, upload works
+- #37: Action button: Search Literature - modal opens, search works, results displayed
+- #38: Action button: Generate Output - format selection, output generation works
+- #39: Data planning workflow - questions about data needs addressed
+- #40: Document framing evaluation - text file analysis with theme/quote detection
+- #41: Complete I Have an Idea workflow end-to-end - full 12-step workflow verified
+
+### Feature Statistics (Updated)
+- Total: 175
+- Passing: 34
+- In Progress: 0
+- Percentage Complete: 19.4%

@@ -262,7 +262,13 @@ async def analyze_anomalies(file: UploadFile = File(...)):
         })
 
     if not anomalies:
-        summary = "No statistical outliers detected. Data appears consistent with normal patterns."
+        summary = "Good news: No statistical outliers detected. Your data appears consistent with expected patterns, which suggests it aligns with theoretical predictions. Consider exploring: (1) different variables or subgroups, (2) interaction effects, or (3) qualitative data that might reveal subtle tensions not captured in statistics."
+        # Add a suggestion to the warnings
+        warnings.append({
+            "type": "no_anomalies",
+            "message": "No anomalies found. This could mean the data matches theory, or that the interesting variation lies elsewhere. Try examining subgroups or looking at interactions between variables.",
+            "severity": "info",
+        })
     else:
         summary = f"Found potential outliers in {len(anomalies)} of {len(numeric_cols)} numeric variables."
 

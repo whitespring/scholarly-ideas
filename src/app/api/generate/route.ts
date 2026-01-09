@@ -74,6 +74,47 @@ Write in polished academic prose. Each section should be substantive and actiona
 Do NOT include any preamble or explanation - just provide the research brief directly.`,
 };
 
+// Extract key topics from user messages for context-aware fallback
+function extractKeyTopics(text: string): string[] {
+  const topics: string[] = [];
+
+  // Common research-relevant phrases to look for
+  const patterns = [
+    /(?:studying|researching|investigating|examining|exploring)\s+([^.!?]+)/gi,
+    /(?:puzzle|puzzling|surprising|unexpected|contradicts?)\s+(?:about|regarding|that)?\s*([^.!?]+)/gi,
+    /(?:startups?|companies|firms|organizations?|teams?)\s+([^.!?]+)/gi,
+    /(?:theory|theories)\s+(?:of|about|regarding)?\s*([^.!?]+)/gi,
+    /(?:why|how)\s+([^.!?]+)/gi,
+  ];
+
+  for (const pattern of patterns) {
+    const matches = text.matchAll(pattern);
+    for (const match of matches) {
+      if (match[1] && match[1].length > 10 && match[1].length < 100) {
+        topics.push(match[1].trim().toLowerCase());
+      }
+    }
+  }
+
+  // Also extract noun phrases that appear frequently
+  const words = text.toLowerCase().split(/\s+/);
+  const importantTerms = [
+    "startup", "startups", "funding", "venture", "capital", "scaling",
+    "performance", "failure", "success", "growth", "learning",
+    "resource", "theory", "organizational", "management", "innovation",
+    "team", "conflict", "leadership", "strategy", "entrepreneurship"
+  ];
+
+  const foundTerms = importantTerms.filter(term => words.includes(term));
+  if (foundTerms.length > 0) {
+    topics.unshift(foundTerms.slice(0, 3).join(" and "));
+  }
+
+  // Deduplicate and return
+  const uniqueTopics = [...new Set(topics)];
+  return uniqueTopics.length > 0 ? uniqueTopics : ["the research phenomenon"];
+}
+
 function buildContext(
   messages: Message[],
   literatureFindings: LiteratureResult[],
@@ -146,77 +187,76 @@ export async function POST(request: NextRequest) {
 
     // Check for API key
     if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === "your_anthropic_api_key_here") {
-      // Development fallback: return sample output
-      const sampleOutputs: Record<string, string> = {
-        statement: `Recent observations suggest a puzzling pattern in organizational team dynamics: teams experiencing moderate levels of task-related conflict often outperform their more harmonious counterparts. This finding stands in apparent contradiction to classical team effectiveness models, which generally predict that conflict—regardless of type—should impair group performance through increased coordination costs, reduced cohesion, and diverted attention from task completion.
+      // Development fallback: generate context-aware output from conversation
+      const context = buildContext(messages, literatureFindings, analysisResults, subfield);
 
-This discrepancy presents a genuine theoretical puzzle. If conflict is uniformly detrimental as traditional models suggest, we should observe a monotonically negative relationship between conflict and performance. Yet emerging evidence points to a more nuanced reality: under certain conditions, disagreement may serve as a catalyst for deeper information processing, creative problem-solving, and the surfacing of diverse perspectives that might otherwise remain hidden. Understanding when and why conflict enhances rather than undermines team performance could significantly advance our theoretical understanding of group dynamics and provide actionable guidance for managers navigating the inherent tensions of collaborative work.`,
+      // Extract key themes from the conversation for the fallback
+      const userMessages = messages.filter(m => m.role === "user").map(m => m.content).join(" ");
 
-        introduction: `# Introduction
+      // Generate context-aware fallback output
+      const generateContextAwareFallback = (type: string): string => {
+        // Extract potential key topics from user messages
+        const topics = extractKeyTopics(userMessages);
+        const mainTopic = topics[0] || "research phenomenon";
+        const secondaryTopics = topics.slice(1, 3).join(", ") || "related factors";
 
-The relationship between conflict and performance in organizational teams has long puzzled scholars and practitioners alike. Conventional wisdom, supported by decades of research, suggests that conflict is detrimental to team functioning—it diverts attention from task work, damages interpersonal relationships, and impairs the coordination essential for collective achievement (De Dreu & Weingart, 2003; Jehn, 1995). Yet a growing body of evidence challenges this straightforward narrative, revealing conditions under which conflict may actually enhance team outcomes.
+        if (type === "statement") {
+          return `Recent observations reveal a puzzling pattern regarding ${mainTopic}. Based on the conversation, the researcher has identified an empirical anomaly: ${userMessages.slice(0, 300)}${userMessages.length > 300 ? "..." : ""}
 
-## The Theoretical Puzzle
+This finding appears to contradict established theoretical predictions. The discrepancy between what theory predicts and what has been observed presents a genuine research puzzle worthy of systematic investigation. Understanding this pattern could advance our theoretical knowledge and provide practical insights for practitioners in the field.`;
+        } else if (type === "introduction") {
+          return `# Introduction
 
-Classical team effectiveness models, from Hackman's (1987) input-process-output framework to more recent multilevel theories of team performance (Kozlowski & Ilgen, 2006), generally treat conflict as a process loss—a friction that reduces the team's ability to convert its inputs into outputs. The logic is intuitive: when team members disagree, they must expend resources resolving those disagreements rather than pursuing their collective goals.
+## The Puzzle
 
-However, this view struggles to account for a compelling counter-pattern: teams with moderate levels of task conflict often demonstrate superior creative problem-solving, more thorough information processing, and ultimately better performance than teams with very low conflict (Jehn & Mannix, 2001). This finding suggests that some degree of disagreement may be not merely tolerable but actively beneficial.
+${mainTopic.charAt(0).toUpperCase() + mainTopic.slice(1)} presents a compelling theoretical puzzle. Based on the researcher's observations: ${userMessages.slice(0, 500)}${userMessages.length > 500 ? "..." : ""}
+
+## Theoretical Background
+
+Existing theories in this domain would predict different outcomes than what has been observed. This discrepancy suggests our current theoretical frameworks may be incomplete or may require boundary conditions we have not yet identified.
 
 ## Why This Matters
 
-Resolving this puzzle carries significant implications for both theory and practice. Theoretically, it challenges us to move beyond simple linear models of conflict's effects and develop more nuanced frameworks that can account for the apparent curvilinear or contingent relationships we observe. Practically, it offers the prospect of guidance for managers who must navigate the delicate balance between fostering the creative friction that drives innovation and preventing the destructive conflict that tears teams apart.
+Resolving this puzzle would contribute to our understanding of ${mainTopic} and its relationship to ${secondaryTopics}. The implications extend to both theory development and practical application.
 
 ## Our Approach
 
-In this paper, we develop and test a contingency model of conflict and performance that identifies the boundary conditions under which task conflict enhances versus undermines team outcomes. Drawing on information processing theory and research on team psychological safety, we propose that the effects of conflict depend critically on how teams process and integrate the diverse perspectives that disagreement surfaces.`,
-
-        brief: `# Research Brief: The Conflict-Performance Paradox in Teams
+This paper develops and tests a framework to understand when and why ${mainTopic} leads to the observed outcomes. By identifying the mechanisms and boundary conditions at play, we aim to resolve the apparent contradiction between theory and evidence.`;
+        } else {
+          return `# Research Brief
 
 ## 1. The Puzzle
 
-Observations from both field studies and laboratory research reveal a counterintuitive pattern: teams with moderate levels of task conflict often outperform teams with very low or very high conflict. This finding contradicts the predictions of classical team effectiveness models, which generally suggest that conflict should have uniformly negative effects on team performance.
-
-The puzzle is sharpened by the distinction between task conflict (disagreements about work content and approaches) and relationship conflict (interpersonal friction and animosity). While relationship conflict appears consistently detrimental, task conflict shows a more complex pattern—sometimes positive, sometimes negative, depending on conditions we do not yet fully understand.
-
-This represents a genuine theoretical anomaly: our dominant frameworks cannot adequately explain when and why task conflict enhances performance, nor can they reliably predict the conditions under which conflict transitions from helpful to harmful.
+${userMessages.slice(0, 600)}${userMessages.length > 600 ? "..." : ""}
 
 ## 2. Why It Matters
 
-**Theoretical Significance:** Resolving this puzzle would advance our understanding of group dynamics by moving beyond simple linear models to more nuanced contingency frameworks. It would help integrate disparate findings in the conflict literature and potentially reveal new mechanisms through which diverse perspectives contribute to collective intelligence.
+**Theoretical Significance:** This puzzle challenges existing frameworks and could lead to theoretical refinement or extension. Understanding ${mainTopic} more deeply would advance our field.
 
-**Practical Significance:** Managers face daily decisions about how to handle disagreement in their teams. Without clear guidance on when conflict is productive versus destructive, they may either suppress valuable debate or allow harmful friction to fester. A clearer theoretical account would enable more effective conflict management strategies.
+**Practical Significance:** Practitioners would benefit from clearer guidance on ${mainTopic} and its implications.
 
 ## 3. Key Related Papers
 
-1. **Jehn, K. A. (1995). "A multimethod examination of the benefits and detriments of intragroup conflict."** Foundational paper establishing the task/relationship conflict distinction.
-
-2. **De Dreu, C. K. W., & Weingart, L. R. (2003). "Task versus relationship conflict, team performance, and team member satisfaction: A meta-analysis."** Comprehensive meta-analysis finding negative effects of both conflict types, though with substantial heterogeneity.
-
-3. **Jehn, K. A., & Mannix, E. A. (2001). "The dynamic nature of conflict: A longitudinal study."** Demonstrates that conflict patterns evolve over time and have different effects at different stages of team development.
-
-4. **De Dreu, C. K. W. (2006). "When too little or too much hurts: Evidence for a curvilinear relationship."** Provides evidence for inverted U-shaped relationship between task conflict and outcomes.
+Based on the themes discussed, relevant literature likely includes work on:
+- ${mainTopic} and its antecedents
+- ${secondaryTopics} in organizational contexts
+- Theoretical frameworks predicting outcomes in this domain
 
 ## 4. Evidence Needed
 
-To convincingly address this puzzle, research would need to:
-
-- **Longitudinal data** tracking teams over time to capture how conflict patterns evolve and their dynamic effects on performance
-- **Multiple measures of conflict** distinguishing task, relationship, and process conflict at fine-grained intervals
-- **Objective performance metrics** that go beyond self-report and capture multiple dimensions of team effectiveness
-- **Moderator measures** including psychological safety, team diversity, task complexity, and conflict management norms
-- **Process data** illuminating how teams handle disagreement—do they integrate diverse views or simply suppress them?
+To address this puzzle convincingly, research would need:
+- Systematic data on ${mainTopic}
+- Measures of potential moderating and mediating variables
+- Longitudinal or experimental designs to establish causality
 
 ## 5. Suggested Approach
 
-**Research Design:** A longitudinal field study following project teams from formation through completion, with weekly surveys capturing conflict levels and types, team process observations, and objective performance metrics at project milestones.
-
-**Sample:** Knowledge-intensive teams (e.g., product development, consulting, research teams) where task conflict is likely to be prevalent and consequential. Target 50-100 teams to enable multilevel modeling.
-
-**Key Analyses:** Growth curve models examining how conflict trajectories relate to performance outcomes, moderated by team and contextual factors. Process tracing to identify mechanisms through which task conflict influences information processing and decision quality.`,
+A multi-method approach combining quantitative analysis with qualitative insights would be well-suited to this puzzle. The researcher should consider both the boundary conditions under which the observed pattern holds and the mechanisms that might explain it.`;
+        }
       };
 
       const response: GenerateResponse = {
-        content: sampleOutputs[outputType] || sampleOutputs.statement,
+        content: generateContextAwareFallback(outputType),
         outputType,
       };
 

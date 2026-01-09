@@ -65,6 +65,7 @@ export default function ConversationPage() {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [selectedFileDetails, setSelectedFileDetails] = useState<{ id: string; name: string; type: string; size: number; uploadedAt: string; summary?: string } | null>(null);
   const [selectedPaperDetails, setSelectedPaperDetails] = useState<{ id: string; title: string; authors: string[]; year: number; abstract?: string; url?: string; citationCount?: number; isCrossDisciplinary: boolean; discipline?: string } | null>(null);
+  const [selectedArtifactDetails, setSelectedArtifactDetails] = useState<{ id: string; type: string; content: string; version: number; createdAt: string } | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -583,11 +584,15 @@ export default function ConversationPage() {
         type: outputType,
       });
 
+      // Calculate version number based on existing artifacts of this type
+      const existingOfType = session.puzzleArtifacts.filter(a => a.type === outputType);
+      const nextVersion = existingOfType.length + 1;
+
       // Also add as an artifact to the session
       addArtifact({
         type: outputType,
         content: data.content,
-        version: 1,
+        version: nextVersion,
       });
     } catch (error) {
       console.error("Generate output error:", error);
@@ -1270,6 +1275,58 @@ export default function ConversationPage() {
         </div>
       )}
 
+      {/* Artifact Details Modal */}
+      {selectedArtifactDetails && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 pr-4">
+                <FileOutput className="h-5 w-5 text-primary-600 flex-shrink-0" />
+                {selectedArtifactDetails.type === "statement" ? "Puzzle Statement" :
+                 selectedArtifactDetails.type === "introduction" ? "Introduction Draft" :
+                 selectedArtifactDetails.type === "brief" ? "Research Brief" : "Output"}
+                <span className="text-sm font-normal text-gray-500">v{selectedArtifactDetails.version}</span>
+              </h2>
+              <button
+                onClick={() => setSelectedArtifactDetails(null)}
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Created</label>
+                <p className="text-gray-800 mt-1">{new Date(selectedArtifactDetails.createdAt).toLocaleString()}</p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Content</label>
+                <div className="mt-2 p-4 bg-gray-50 rounded-lg border border-gray-200 max-h-[50vh] overflow-y-auto">
+                  <p className="text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">{selectedArtifactDetails.content}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => copyToClipboard(selectedArtifactDetails.content)}
+                className="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
+              >
+                Copy to Clipboard
+              </button>
+              <button
+                onClick={() => setSelectedArtifactDetails(null)}
+                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Conversation area */}
@@ -1658,6 +1715,46 @@ export default function ConversationPage() {
                           📚 {paper.discipline}
                         </div>
                       )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {/* Generated outputs */}
+            <section>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                Generated Outputs
+              </h3>
+              {session.puzzleArtifacts.length === 0 ? (
+                <p className="text-sm text-gray-500 italic">
+                  No outputs generated
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {session.puzzleArtifacts.map((artifact) => (
+                    <li
+                      key={artifact.id}
+                      className="text-sm bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                      onClick={() => setSelectedArtifactDetails(artifact)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedArtifactDetails(artifact);
+                        }
+                      }}
+                    >
+                      <div className="font-medium text-gray-700 leading-snug hover:text-primary-700">
+                        {artifact.type === "statement" ? "Puzzle Statement" :
+                         artifact.type === "introduction" ? "Introduction Draft" :
+                         artifact.type === "brief" ? "Research Brief" : artifact.type}
+                        <span className="ml-2 text-xs text-gray-500">v{artifact.version}</span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {new Date(artifact.createdAt).toLocaleString()}
+                      </div>
                     </li>
                   ))}
                 </ul>

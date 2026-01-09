@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/context/SessionContext";
 import { SUBFIELDS, type EntryMode, type Subfield } from "@/types";
 import { cn } from "@/lib/utils";
-import { Lightbulb, Database, Compass, ChevronDown } from "lucide-react";
+import { Lightbulb, Database, Compass, ChevronDown, Upload } from "lucide-react";
 
 interface EntryModeCard {
   mode: EntryMode;
@@ -40,13 +40,42 @@ const entryModes: EntryModeCard[] = [
 
 export default function WelcomePage() {
   const router = useRouter();
-  const { initSession } = useSession();
+  const { initSession, importSession } = useSession();
   const [selectedSubfield, setSelectedSubfield] = useState<Subfield | "">("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleModeSelect = (mode: EntryMode) => {
     initSession(mode, selectedSubfield || undefined);
     router.push("/conversation");
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (data.messages && Array.isArray(data.messages)) {
+        importSession(data);
+        router.push("/conversation");
+      } else {
+        alert("Invalid session file format. Please select a valid Scholarly Ideas export file.");
+      }
+    } catch {
+      alert("Failed to import session. Please check the file format.");
+    }
+
+    // Reset the file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   return (
@@ -167,13 +196,40 @@ export default function WelcomePage() {
           })}
         </div>
 
-        {/* Footer note */}
-        <p className="text-center text-gray-500 text-sm mt-12">
-          Your data and conversations are processed transiently and never stored
-          on our servers.
-          <br />
-          Export your session at any time to save your progress.
-        </p>
+        {/* Footer note with import option */}
+        <div className="text-center mt-12">
+          <p className="text-gray-500 text-sm mb-4">
+            Your data and conversations are processed transiently and never stored
+            on our servers.
+            <br />
+            <strong>Remember to export your session regularly to save your progress.</strong>
+          </p>
+
+          {/* Import previous session button */}
+          <button
+            onClick={handleImportClick}
+            className={cn(
+              "inline-flex items-center gap-2 px-4 py-2 rounded-lg",
+              "text-sm text-primary border border-primary/30",
+              "hover:bg-primary/5 transition-colors",
+              "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+            )}
+          >
+            <Upload className="h-4 w-4" />
+            Import previous session
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImportFile}
+            className="hidden"
+            aria-label="Import session file"
+          />
+          <p className="text-gray-400 text-xs mt-2">
+            Lost your work? Import a previously exported session to continue.
+          </p>
+        </div>
       </div>
     </main>
   );

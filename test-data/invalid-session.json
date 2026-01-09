@@ -1,0 +1,4 @@
+{
+  "someKey": "this is valid json",
+  "but": "missing required session fields"
+}

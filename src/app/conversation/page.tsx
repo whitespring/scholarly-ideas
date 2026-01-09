@@ -16,6 +16,8 @@ import {
   Loader2,
   X,
   FileText,
+  Download,
+  FileUp,
 } from "lucide-react";
 
 // Opening prompts based on mode
@@ -28,7 +30,7 @@ const openingPrompts: Record<string, string> = {
 
 export default function ConversationPage() {
   const router = useRouter();
-  const { session, addMessage, updateSettings, addFile, addAnalysis, addLiterature, addArtifact } = useSession();
+  const { session, addMessage, updateSettings, addFile, addAnalysis, addLiterature, addArtifact, importSession } = useSession();
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -42,6 +44,8 @@ export default function ConversationPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedOutput, setGeneratedOutput] = useState<{ content: string; type: string } | null>(null);
   const [selectedOutputType, setSelectedOutputType] = useState<"statement" | "introduction" | "brief">("statement");
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -497,6 +501,76 @@ export default function ConversationPage() {
     }
   };
 
+  const handleExportConversation = () => {
+    const exportData = {
+      ...session,
+      exportedAt: new Date().toISOString(),
+      version: "1.0",
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `scholarly-ideas-session-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setShowExportModal(false);
+  };
+
+  const handleExportOutputsOnly = () => {
+    const exportData = {
+      puzzleArtifacts: session.puzzleArtifacts,
+      exportedAt: new Date().toISOString(),
+      version: "1.0",
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `scholarly-ideas-outputs-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setShowExportModal(false);
+  };
+
+  const handleImportSession = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const importedSession = JSON.parse(content);
+
+        // Validate the imported data has required fields
+        if (!importedSession.id || !importedSession.mode || !importedSession.messages) {
+          throw new Error("Invalid session file format");
+        }
+
+        importSession(importedSession);
+        setShowImportModal(false);
+
+        // Add a welcome back message
+        addMessage({
+          role: "assistant",
+          content: `Welcome back! I've restored your previous session from ${importedSession.exportedAt ? new Date(importedSession.exportedAt).toLocaleDateString() : "an earlier date"}. You had ${importedSession.messages.length} messages in your conversation. Let's continue where you left off.`,
+        });
+      } catch (error) {
+        console.error("Import error:", error);
+        alert("Failed to import session. Please check the file format.");
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset the file input
+    event.target.value = "";
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* Header */}
@@ -516,6 +590,26 @@ export default function ConversationPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Export button */}
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+            aria-label="Export session"
+            title="Export session"
+          >
+            <Download className="h-5 w-5" />
+          </button>
+
+          {/* Import button */}
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+            aria-label="Import session"
+            title="Import session"
+          >
+            <FileUp className="h-5 w-5" />
+          </button>
+
           {/* Settings toggle */}
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -745,6 +839,107 @@ export default function ConversationPage() {
                   Cancel
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Export Session</h3>
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-6">
+              Choose what you&apos;d like to export from your session.
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={handleExportConversation}
+                className="w-full text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+              >
+                <h4 className="font-semibold text-gray-800 mb-1">Export Conversation</h4>
+                <p className="text-sm text-gray-600">
+                  Full session with all messages, analysis results, and literature findings. Can be re-imported later.
+                </p>
+              </button>
+              <button
+                onClick={handleExportOutputsOnly}
+                disabled={session.puzzleArtifacts.length === 0}
+                className={cn(
+                  "w-full text-left p-4 border border-gray-200 rounded-lg transition-colors",
+                  session.puzzleArtifacts.length > 0
+                    ? "hover:border-primary hover:bg-primary/5"
+                    : "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <h4 className="font-semibold text-gray-800 mb-1">Export Outputs Only</h4>
+                <p className="text-sm text-gray-600">
+                  {session.puzzleArtifacts.length > 0
+                    ? `Export ${session.puzzleArtifacts.length} generated artifact(s) only.`
+                    : "No outputs generated yet."}
+                </p>
+              </button>
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Import Session</h3>
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 mb-6">
+              Import a previously exported session to continue where you left off.
+            </p>
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+              <FileUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600 mb-4">
+                Select a JSON file to import
+              </p>
+              <label className="cursor-pointer">
+                <span className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-800 transition-colors">
+                  Choose File
+                </span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportSession}
+                  className="hidden"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

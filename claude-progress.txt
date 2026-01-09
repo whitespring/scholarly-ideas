@@ -254,3 +254,50 @@ scholarly-ideas/
 - Passing: 34
 - In Progress: 0
 - Percentage Complete: 19.4%
+
+---
+
+## Session 4: E2E Workflows & Advanced Features (2026-01-09)
+
+### Completed Tasks
+
+#### 1. E2E Workflow Testing ✅
+- **Feature #42**: Complete "I Have Data" workflow end-to-end (12 steps)
+  - Navigate → select mode → answer context → upload file → review summary
+  - Respond to patterns → explore anomalies → literature search → review papers
+  - Articulate puzzle → generate research brief → export session
+- **Feature #43**: Complete "I'm Exploring" workflow end-to-end (10 steps)
+  - Navigate → select mode → answer broad questions → literature surfaced
+  - Query debates → discover direction → continue as idea flow
+  - Complete articulation → generate output → export session
+
+#### 2. Session & State Features ✅
+- **Feature #44**: Multiple file uploads in single session - both files shown, combined insights
+- **Feature #45**: Session state persists in browser - messages, files, analysis maintained
+- **Feature #46**: Feedback escalation tracking - feedbackEscalation field in session metadata
+
+#### 3. Literature Features ✅
+- **Feature #47**: Cross-disciplinary source flagging - Psychology/Economics papers marked with 📚
+- **Feature #48**: Theory extraction from literature - abstracts show theories, prompts for angle differentiation
+
+#### 4. Rigor & Analysis Features ✅
+- **Feature #49**: Rigor warnings for multiple testing - warnings shown when checking many variables
+- **Feature #50**: Theory-first prompting - asks "What would theory predict?" before showing anomalies
+
+### Technical Notes
+- All three entry mode workflows now fully tested E2E
+- Cross-disciplinary flags working with development fallback papers
+- Rigor warnings trigger appropriately (sample_size < 30, multiple_testing > 5 variables)
+- Session exports include feedbackEscalation field for tracking
+
+### Feature Statistics
+- Total: 175
+- Passing: 43
+- In Progress: 0
+- Percentage Complete: 24.6%
+
+### Next Steps for Future Agents
+1. Continue with feature #51 onwards
+2. Focus on error handling, accessibility, and responsive design features
+3. Consider implementing PDF export (#28 - skipped)
+4. Review security and edge case features

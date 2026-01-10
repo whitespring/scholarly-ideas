@@ -12,7 +12,9 @@ const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 // Rate limit tracking
 let lastRequestTime = 0;
-const MIN_REQUEST_INTERVAL = 200; // 200ms between requests (5 req/sec safe limit)
+// Dynamic rate limit: 200ms (5req/s) with key, 3000ms (1req/3s) without key
+const HAS_API_KEY = !!process.env.SEMANTIC_SCHOLAR_API_KEY;
+const MIN_REQUEST_INTERVAL = HAS_API_KEY ? 200 : 3000;
 let rateLimitedUntil = 0;
 const RATE_LIMIT_BACKOFF = 5000; // 5 seconds backoff when rate limited
 
@@ -298,14 +300,14 @@ function getDevelopmentFallbackPapers(query: string, subfield?: string): Literat
 
   // Select papers based on subfield or query keywords
   if (subfieldLower.includes("strategy") || queryLower.includes("strategy") ||
-      queryLower.includes("diversification") || queryLower.includes("corporate") ||
-      queryLower.includes("competitive") || queryLower.includes("acquisition")) {
+    queryLower.includes("diversification") || queryLower.includes("corporate") ||
+    queryLower.includes("competitive") || queryLower.includes("acquisition")) {
     return strategyPapers;
   }
 
   if (subfieldLower.includes("entrepreneurship") || queryLower.includes("entrepreneur") ||
-      queryLower.includes("startup") || queryLower.includes("venture") ||
-      queryLower.includes("new venture") || queryLower.includes("founder")) {
+    queryLower.includes("startup") || queryLower.includes("venture") ||
+    queryLower.includes("new venture") || queryLower.includes("founder")) {
     return entrepreneurshipPapers;
   }
 
@@ -352,10 +354,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Build search query
-    let searchQuery = query;
-    if (subfield) {
-      searchQuery = `${query} ${subfield}`;
-    }
+    // Use the user's query directly without appending subfield to ensure relevance
+    const searchQuery = query;
 
     // Call Semantic Scholar API
     const apiUrl = new URL(`${SEMANTIC_SCHOLAR_API}/paper/search`);
@@ -380,91 +380,47 @@ export async function POST(request: NextRequest) {
       return fetch(apiUrl.toString(), { headers });
     };
 
-    // Check if we need to wait due to rate limiting
+    // Check if we need to wait due to rate limiting OR minimum interval
     const now = Date.now();
-    if (rateLimitedUntil > now || requestQueue.length > 0) {
+    const timeSinceLastRequest = now - lastRequestTime;
+    const shouldQueue = rateLimitedUntil > now || requestQueue.length > 0 || timeSinceLastRequest < MIN_REQUEST_INTERVAL;
+
+    let response: globalThis.Response;
+
+    if (shouldQueue) {
       // Queue this request
-      console.log(`Queueing request, ${requestQueue.length} requests in queue`);
-      const response = await new Promise<globalThis.Response>((resolve, reject) => {
+      console.log(`Queueing request (Interval: ${MIN_REQUEST_INTERVAL}ms), ${requestQueue.length} requests in queue`);
+      response = await new Promise<globalThis.Response>((resolve, reject) => {
         requestQueue.push({ resolve, reject, request: makeRequest });
         processQueue();
       });
-
-      // Continue processing with queued response
-      if (!response.ok) {
-        throw new Error(`Semantic Scholar API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const papers: SemanticScholarPaper[] = data.data || [];
-
-      // Transform and return (same as below)
-      const results: LiteratureResult[] = papers.map((paper) => {
-        const discipline = paper.fieldsOfStudy?.[0] || "Unknown";
-        const isCrossDisciplinary = CROSS_DISCIPLINARY_FIELDS.some(
-          (field) =>
-            paper.fieldsOfStudy?.some(
-              (f) => f.toLowerCase().includes(field.toLowerCase())
-            )
-        );
-        return {
-          id: generateId(),
-          paperId: paper.paperId,
-          title: paper.title,
-          authors: paper.authors?.map((a) => a.name) || [],
-          year: paper.year || 0,
-          abstract: paper.abstract,
-          url: paper.url || `https://www.semanticscholar.org/paper/${paper.paperId}`,
-          citationCount: paper.citationCount,
-          isCrossDisciplinary,
-          discipline: isCrossDisciplinary ? discipline : undefined,
-        };
-      });
-
-      cache.set(cacheKey, { data: results, timestamp: Date.now() });
-
-      return NextResponse.json({
-        papers: results,
-        totalFound: data.total || results.length,
-        cached: false,
-        wasQueued: true,
-      });
+    } else {
+      // No queueing needed, make the request directly
+      lastRequestTime = now; // Update last request time immediately
+      response = await makeRequest();
     }
-
-    // Track request time
-    lastRequestTime = Date.now();
-    const response = await makeRequest();
 
     if (!response.ok) {
       if (response.status === 429) {
         // Set rate limit backoff
         rateLimitedUntil = Date.now() + RATE_LIMIT_BACKOFF;
         console.log(`Rate limited by Semantic Scholar, backing off until ${new Date(rateLimitedUntil).toISOString()}`);
+        console.log(`Using development fallback papers for query: ${query}`);
 
-        // In development, use fallback papers when rate limited
-        if (process.env.NODE_ENV === "development") {
-          console.log("Using development fallback papers for subfield:", subfield || "none");
-          const fallbackPapers = getDevelopmentFallbackPapers(query, subfield);
+        // Use development fallback papers instead of returning an error
+        const fallbackPapers = getDevelopmentFallbackPapers(query, subfield);
 
-          // Cache fallback results
-          cache.set(cacheKey, { data: fallbackPapers, timestamp: Date.now() });
+        // Cache the fallback results
+        cache.set(cacheKey, { data: fallbackPapers, timestamp: Date.now() });
 
-          const fallbackResponse: LiteratureResponse = {
-            papers: fallbackPapers,
-            totalFound: fallbackPapers.length,
-            cached: false,
-          };
-          return NextResponse.json(fallbackResponse);
-        }
+        const fallbackResponse: LiteratureResponse = {
+          papers: fallbackPapers,
+          totalFound: fallbackPapers.length,
+          cached: false,
+          fallback: true, // Indicate these are fallback results
+        };
 
-        return NextResponse.json(
-          {
-            error: "rate_limit",
-            message: "Literature search rate limit reached. Please wait a moment and try again.",
-            retryAfter: RATE_LIMIT_BACKOFF / 1000,
-          },
-          { status: 429 }
-        );
+        return NextResponse.json(fallbackResponse);
       }
       throw new Error(`Semantic Scholar API error: ${response.status}`);
     }
@@ -499,10 +455,9 @@ export async function POST(request: NextRequest) {
     // Cache results
     cache.set(cacheKey, { data: results, timestamp: Date.now() });
 
-    // Clean old cache entries periodically
     if (cache.size > 100) {
       const now = Date.now();
-      for (const [key, value] of cache.entries()) {
+      for (const [key, value] of Array.from(cache.entries())) {
         if (now - value.timestamp > CACHE_TTL) {
           cache.delete(key);
         }

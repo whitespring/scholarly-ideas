@@ -93,6 +93,7 @@ export interface LiteratureResponse {
   papers: LiteratureResult[];
   totalFound: number;
   cached: boolean;
+  fallback?: boolean; // True when using fallback papers due to rate limiting
 }
 
 // Generate Output API

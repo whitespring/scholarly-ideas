@@ -118,7 +118,7 @@ function mockThemeAnalysis(text: string): {
       themes.push({
         theme: themeName,
         frequency: matches.length,
-        examples: [...new Set(matches.map(m => m.toLowerCase()))].slice(0, 5),
+        examples: Array.from(new Set(matches.map(m => m.toLowerCase()))).slice(0, 5),
       });
     }
   }

@@ -89,11 +89,26 @@ export interface LiteratureRequest {
   limit?: number;
 }
 
+// Search metadata describing what strategies were used
+export interface SearchMetadata {
+  tier: 1 | 2 | 3;  // Which abstraction tier succeeded (1=narrow, 2=context-abstract, 3=foundational)
+  exactMatchFound: boolean;
+  usedSynonyms: boolean;
+  usedBroadening: boolean;
+  relaxedCitations: boolean;
+  includedNonQualityJournals: boolean;  // Always false in 3-tier system
+  searchTermsUsed: string[];
+  message?: string;  // User-facing explanation of search results
+}
+
 export interface LiteratureResponse {
-  papers: LiteratureResult[];
+  papers: LiteratureResult[];         // All papers (backwards compat)
+  classics: LiteratureResult[];       // Foundational works (>5yr, >=500 cites)
+  recent: LiteratureResult[];         // Recent contributions (<=5yr)
   totalFound: number;
   cached: boolean;
-  fallback?: boolean; // True when using fallback papers due to rate limiting
+  analysis?: string; // Claude's analysis of research puzzles from the literature
+  searchMetadata?: SearchMetadata; // Metadata about search strategy used
 }
 
 // Generate Output API

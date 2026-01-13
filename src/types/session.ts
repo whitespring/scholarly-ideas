@@ -66,6 +66,8 @@ export interface AnalysisResult {
   createdAt: string;
 }
 
+export type JournalTier = 'UTD24' | 'Top Disciplinary' | 'Quality Management' | 'Other';
+
 export interface LiteratureResult {
   id: string;
   paperId: string;
@@ -75,9 +77,13 @@ export interface LiteratureResult {
   abstract?: string;
   url?: string;
   citationCount?: number;
+  influentialCitationCount?: number;
   isCrossDisciplinary: boolean;
   discipline?: string;
   relevanceScore?: number;
+  journal?: string;
+  journalTier?: JournalTier;
+  isClassic?: boolean;
 }
 
 export interface PuzzleArtifact {

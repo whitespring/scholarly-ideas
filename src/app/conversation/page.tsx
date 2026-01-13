@@ -3,8 +3,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/context/SessionContext";
+import { useAISettings } from "@/context/AISettingsContext";
 import { cn, formatTimestamp, fetchWithTimeout, retryWithBackoff } from "@/lib/utils";
-import type { Message, AnalysisResult } from "@/types";
+import type { Message, AnalysisResult, LiteratureResult } from "@/types";
 import {
   Send,
   Upload,
@@ -19,8 +20,11 @@ import {
   Download,
   FileUp,
   FileDown,
+  Cpu,
 } from "lucide-react";
 import jsPDF from "jspdf";
+import { AIProviderSettings } from "@/components/settings/AIProviderSettings";
+import { PROVIDER_CONFIGS } from "@/lib/ai/config";
 
 // Opening prompts based on mode
 const openingPrompts: Record<string, string> = {
@@ -33,7 +37,9 @@ const openingPrompts: Record<string, string> = {
 export default function ConversationPage() {
   const router = useRouter();
   const { session, addMessage, updateSettings, addFile, removeFile, addAnalysis, addLiterature, addArtifact, importSession } = useSession();
+  const { settings: aiSettings, getRequestHeaders, isConfigured: isAIConfigured } = useAISettings();
   const [input, setInput] = useState("");
+  const [showAISettings, setShowAISettings] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -66,7 +72,7 @@ export default function ConversationPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [selectedFileDetails, setSelectedFileDetails] = useState<{ id: string; name: string; type: string; size: number; uploadedAt: string; summary?: string } | null>(null);
-  const [selectedPaperDetails, setSelectedPaperDetails] = useState<{ id: string; title: string; authors: string[]; year: number; abstract?: string; url?: string; citationCount?: number; isCrossDisciplinary: boolean; discipline?: string } | null>(null);
+  const [selectedPaperDetails, setSelectedPaperDetails] = useState<LiteratureResult | null>(null);
   const [selectedArtifactDetails, setSelectedArtifactDetails] = useState<{ id: string; type: string; content: string; version: number; createdAt: string } | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -159,7 +165,7 @@ export default function ConversationPage() {
         async () => {
           const response = await fetchWithTimeout("/api/chat", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getRequestHeaders() },
             body: JSON.stringify({
               messages: [...session.messages, { role: "user", content: userMessage }],
               settings: session.settings,
@@ -443,7 +449,7 @@ export default function ConversationPage() {
         const quoteData = await quoteResponse.json();
         if (quoteData.result) {
           addAnalysis({
-            type: "quote",
+            type: "quotes",
             summary: quoteData.result.summary,
             details: quoteData.result.details,
             rigorWarnings: (quoteData.result.rigor_warnings || []).map((w: { type: string; message: string; severity: string }) => ({
@@ -517,7 +523,7 @@ export default function ConversationPage() {
     try {
       const response = await fetch("/api/literature", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getRequestHeaders() },
         body: JSON.stringify({
           query: query.trim(),
           subfield: session.subfield,
@@ -528,32 +534,66 @@ export default function ConversationPage() {
       const data = await response.json();
 
       if (!response.ok) {
+        if (response.status === 429) {
+          // Rate limited - show user-friendly message with retry suggestion
+          addMessage({
+            role: "assistant",
+            content: "The literature search API is rate limited (max 1 request per second). Please wait a few seconds and try your search again. This helps ensure fair access for all users.",
+          });
+          return;
+        }
         throw new Error(data.message || "Failed to search literature");
       }
 
       if (data.papers && data.papers.length > 0) {
         addLiterature(data.papers);
 
-        // Format papers for the message
-        const papersList = data.papers.slice(0, 5).map((p: { title: string; authors: string[]; year: number; isCrossDisciplinary?: boolean; discipline?: string }) =>
-          `- **${p.title}** (${p.authors.slice(0, 2).join(", ")}${p.authors.length > 2 ? " et al." : ""}, ${p.year})${p.isCrossDisciplinary ? ` [${p.discipline}]` : ""}`
-        ).join("\n");
+        // Format papers for the message - show classics and recent separately if available
+        const formatPaper = (p: { title: string; authors: string[]; year: number; isCrossDisciplinary?: boolean; discipline?: string; journalTier?: string; citationCount?: number }) =>
+          `- **${p.title}** (${p.authors.slice(0, 2).join(", ")}${p.authors.length > 2 ? " et al." : ""}, ${p.year})${p.journalTier ? ` [${p.journalTier}]` : ""}${p.citationCount ? ` (${p.citationCount.toLocaleString()} citations)` : ""}${p.isCrossDisciplinary ? ` [${p.discipline}]` : ""}`;
 
-        // Check for cross-disciplinary papers
-        const crossDisciplinaryPapers = data.papers.filter((p: { isCrossDisciplinary?: boolean }) => p.isCrossDisciplinary);
-        const crossDisciplinaryNote = crossDisciplinaryPapers.length > 0
-          ? `\n\nI've flagged ${crossDisciplinaryPapers.length} papers from adjacent disciplines that might offer fresh theoretical perspectives.`
-          : "";
+        let papersList: string;
+        if (data.classics?.length > 0 || data.recent?.length > 0) {
+          // Show classics and recent separately
+          const classicsList = data.classics?.length > 0
+            ? `**Classic/Foundational Works (500+ citations):**\n${data.classics.map(formatPaper).join("\n")}`
+            : "";
+          const recentList = data.recent?.length > 0
+            ? `**Recent Research (last 5 years):**\n${data.recent.map(formatPaper).join("\n")}`
+            : "";
+          papersList = [classicsList, recentList].filter(Boolean).join("\n\n");
+        } else {
+          // Fallback to showing all papers
+          papersList = data.papers.map(formatPaper).join("\n");
+        }
+
+        // Build the message content - include search context if not an exact match
+        let content = "";
+        if (data.searchMetadata?.message && !data.searchMetadata.exactMatchFound) {
+          content += `**Note:** ${data.searchMetadata.message}\n\n`;
+        }
+        content += `I found ${data.papers.length} relevant papers for "${query}":\n\n${papersList}`;
+
+        // Add Claude's analysis of research puzzles if available
+        if (data.analysis) {
+          content += `\n\n---\n\n**What I see in this literature:**\n\n${data.analysis}`;
+        } else {
+          // Fallback to the generic questions if no analysis
+          content += "\n\nThese papers seem to address similar themes. **How is your angle different?** What specific contribution would your research make beyond what's already been studied?";
+        }
 
         addMessage({
           role: "assistant",
-          content: `I found ${data.papers.length} relevant papers for "${query}":\n\n${papersList}${crossDisciplinaryNote}\n\nThese papers seem to address similar themes. **How is your angle different?** What specific contribution would your research make beyond what's already been studied?\n\nAre there any papers here that surprise you or challenge your thinking?`,
-          metadata: { phase: "literature", literatureTriggered: true },
+          content,
+          metadata: { phase: "literature", literatureQueried: true },
         });
       } else {
+        // No papers found - use the metadata message if available
+        const noResultsMessage = data.searchMetadata?.message ||
+          `I couldn't find papers matching "${query}". Try adjusting your search terms or being more specific about the topic you're exploring.`;
         addMessage({
           role: "assistant",
-          content: `I couldn't find papers matching "${query}". Try adjusting your search terms or being more specific about the topic you're exploring.`,
+          content: noResultsMessage,
         });
       }
     } catch (error) {
@@ -563,7 +603,7 @@ export default function ConversationPage() {
         role: "assistant",
         content: isNetworkError
           ? "Unable to connect to the server. Please check your internet connection and try again."
-          : "I encountered an error searching the literature. Please try again in a moment.",
+          : (error instanceof Error ? error.message : "I encountered an error searching the literature. Please try again in a moment."),
       });
     } finally {
       setIsSearchingLiterature(false);
@@ -582,7 +622,7 @@ export default function ConversationPage() {
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getRequestHeaders() },
         body: JSON.stringify({
           outputType,
           messages: session.messages,
@@ -714,10 +754,10 @@ export default function ConversationPage() {
       }
     };
 
-    // Title
+    // Title - Editorial burgundy
     doc.setFontSize(24);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(30, 58, 138); // Primary blue
+    doc.setTextColor(124, 45, 54); // Burgundy
     doc.text("Scholarly Ideas", margin, yPos);
     yPos += 12;
 
@@ -743,12 +783,12 @@ export default function ConversationPage() {
 
       // Output type header
       const typeLabel = artifact.type === "statement" ? "Puzzle Statement" :
-                       artifact.type === "introduction" ? "Introduction Draft" :
-                       artifact.type === "brief" ? "Research Brief" : artifact.type;
+        artifact.type === "introduction" ? "Introduction Draft" :
+          artifact.type === "brief" ? "Research Brief" : artifact.type;
 
       doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
-      doc.setTextColor(30, 58, 138);
+      doc.setTextColor(124, 45, 54); // Burgundy
       doc.text(`${typeLabel} (v${artifact.version})`, margin, yPos);
       yPos += 8;
       doc.setTextColor(0, 0, 0);
@@ -819,10 +859,10 @@ export default function ConversationPage() {
       }
     };
 
-    // Title
+    // Title - Editorial burgundy
     doc.setFontSize(24);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(30, 58, 138); // Primary blue
+    doc.setTextColor(124, 45, 54); // Burgundy
     doc.text("Scholarly Ideas", margin, yPos);
     yPos += 12;
 
@@ -853,7 +893,7 @@ export default function ConversationPage() {
       addSectionDivider();
       doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
-      doc.setTextColor(30, 58, 138);
+      doc.setTextColor(124, 45, 54); // Burgundy
       doc.text("Generated Outputs", margin, yPos);
       yPos += 10;
       doc.setTextColor(0, 0, 0);
@@ -861,8 +901,8 @@ export default function ConversationPage() {
       for (const artifact of session.puzzleArtifacts) {
         // Output type header
         const typeLabel = artifact.type === "statement" ? "Puzzle Statement" :
-                         artifact.type === "introduction" ? "Introduction Draft" :
-                         "Research Brief";
+          artifact.type === "introduction" ? "Introduction Draft" :
+            "Research Brief";
 
         addWrappedText(`${typeLabel} (v${artifact.version})`, 14, true);
         yPos += 2;
@@ -878,7 +918,7 @@ export default function ConversationPage() {
       addSectionDivider();
       doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
-      doc.setTextColor(30, 58, 138);
+      doc.setTextColor(124, 45, 54); // Burgundy
       doc.text("Literature Findings", margin, yPos);
       yPos += 10;
       doc.setTextColor(0, 0, 0);
@@ -900,7 +940,7 @@ export default function ConversationPage() {
       addSectionDivider();
       doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
-      doc.setTextColor(30, 58, 138);
+      doc.setTextColor(124, 45, 54); // Burgundy
       doc.text("Conversation Summary", margin, yPos);
       yPos += 10;
       doc.setTextColor(0, 0, 0);
@@ -974,35 +1014,36 @@ export default function ConversationPage() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Success Toast */}
+    <div className="h-screen flex flex-col bg-ivory">
+      {/* Success Toast - Editorial style */}
       {successMessage && (
         <div className="fixed top-4 right-4 z-50 animate-fade-in">
-          <div className="bg-green-50 border border-green-500 text-green-700 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
-            <svg className="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+          <div className="bg-cream border border-parchment-dark text-ink px-5 py-3 rounded-sm shadow-editorial-md flex items-center gap-3">
+            <svg className="w-5 h-5 text-burgundy" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
-            <span className="text-sm font-medium">{successMessage}</span>
+            <span className="font-body text-body-sm">{successMessage}</span>
             <button
               onClick={() => setSuccessMessage(null)}
-              className="text-green-500 hover:text-green-700 transition-colors"
+              className="text-slate-muted hover:text-ink transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         </div>
       )}
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+
+      {/* Header - Editorial style */}
+      <header className="border-b border-parchment bg-ivory px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-6">
           <button
             onClick={handleNavigateHome}
-            className="text-2xl font-bold text-primary hover:opacity-80 transition-opacity"
+            className="font-display text-display-md text-ink hover:text-burgundy transition-colors"
           >
             Scholarly Ideas
           </button>
           {session.subfield && (
-            <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+            <span className="font-sans text-caption uppercase tracking-widest text-burgundy bg-burgundy/5 px-3 py-1.5 border border-burgundy/20 rounded-sm">
               {session.subfield}
             </span>
           )}
@@ -1012,43 +1053,43 @@ export default function ConversationPage() {
           {/* Export button */}
           <button
             onClick={() => setShowExportModal(true)}
-            className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+            className="p-2.5 rounded-sm text-slate hover:text-ink hover:bg-cream transition-colors"
             aria-label="Export session"
             title="Export session"
           >
-            <Download className="h-5 w-5" />
+            <Download className="h-5 w-5" strokeWidth={1.5} />
           </button>
 
           {/* Import button */}
           <button
             onClick={() => setShowImportModal(true)}
-            className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+            className="p-2.5 rounded-sm text-slate hover:text-ink hover:bg-cream transition-colors"
             aria-label="Import session"
             title="Import session"
           >
-            <FileUp className="h-5 w-5" />
+            <FileUp className="h-5 w-5" strokeWidth={1.5} />
           </button>
 
           {/* Settings toggle */}
           <button
             onClick={() => setShowSettings(!showSettings)}
             className={cn(
-              "p-2 rounded-lg transition-colors",
+              "p-2.5 rounded-sm transition-colors",
               showSettings
-                ? "bg-primary text-white"
-                : "text-gray-600 hover:bg-gray-100"
+                ? "bg-burgundy text-ivory"
+                : "text-slate hover:text-ink hover:bg-cream"
             )}
             aria-label="Settings"
           >
-            <Settings className="h-5 w-5" />
+            <Settings className="h-5 w-5" strokeWidth={1.5} />
           </button>
 
-          {/* Settings dropdown */}
+          {/* Settings dropdown - Editorial style */}
           {showSettings && (
-            <div className="absolute top-16 right-4 bg-white rounded-lg shadow-lg border border-gray-200 p-4 z-20 w-64">
-              <div className="space-y-4">
+            <div className="absolute top-16 right-4 bg-white rounded-sm shadow-editorial-lg border border-parchment p-5 z-20 w-72">
+              <div className="space-y-5">
                 <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-sm text-gray-700">Be Direct</span>
+                  <span className="font-sans text-body-sm text-ink">Be Direct</span>
                   <button
                     onClick={() =>
                       updateSettings({
@@ -1056,23 +1097,23 @@ export default function ConversationPage() {
                       })
                     }
                     className={cn(
-                      "w-10 h-6 rounded-full transition-colors",
+                      "w-11 h-6 rounded-sm transition-colors",
                       session.settings.beDirectMode
-                        ? "bg-primary"
-                        : "bg-gray-300"
+                        ? "bg-burgundy"
+                        : "bg-parchment"
                     )}
                   >
                     <div
                       className={cn(
-                        "w-4 h-4 bg-white rounded-full transition-transform mx-1",
-                        session.settings.beDirectMode && "translate-x-4"
+                        "w-5 h-5 bg-white rounded-sm transition-transform mx-0.5 shadow-editorial",
+                        session.settings.beDirectMode && "translate-x-5"
                       )}
                     />
                   </button>
                 </label>
 
                 <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-sm text-gray-700">Teach Me</span>
+                  <span className="font-sans text-body-sm text-ink">Teach Me</span>
                   <button
                     onClick={() =>
                       updateSettings({
@@ -1080,30 +1121,74 @@ export default function ConversationPage() {
                       })
                     }
                     className={cn(
-                      "w-10 h-6 rounded-full transition-colors",
-                      session.settings.teachMeMode ? "bg-primary" : "bg-gray-300"
+                      "w-11 h-6 rounded-sm transition-colors",
+                      session.settings.teachMeMode ? "bg-burgundy" : "bg-parchment"
                     )}
                   >
                     <div
                       className={cn(
-                        "w-4 h-4 bg-white rounded-full transition-transform mx-1",
-                        session.settings.teachMeMode && "translate-x-4"
+                        "w-5 h-5 bg-white rounded-sm transition-transform mx-0.5 shadow-editorial",
+                        session.settings.teachMeMode && "translate-x-5"
                       )}
                     />
                   </button>
                 </label>
+
+                {/* AI Provider Settings */}
+                <div className="pt-4 border-t border-parchment">
+                  <button
+                    onClick={() => {
+                      setShowSettings(false);
+                      setShowAISettings(true);
+                    }}
+                    className="w-full flex items-center justify-between text-left group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Cpu className="h-4 w-4 text-slate group-hover:text-burgundy transition-colors" strokeWidth={1.5} />
+                      <span className="font-sans text-body-sm text-ink group-hover:text-burgundy transition-colors">AI Provider</span>
+                    </div>
+                    <span className="font-sans text-body-xs text-slate">
+                      {PROVIDER_CONFIGS[aiSettings.provider]?.name?.split(' ')[0] || 'Configure'}
+                    </span>
+                  </button>
+                  {!isAIConfigured && (
+                    <p className="font-sans text-body-xs text-burgundy mt-1">
+                      Configure API key to continue
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* AI Settings Modal */}
+          {showAISettings && (
+            <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+              <div className="bg-white rounded-sm shadow-editorial-lg w-full max-w-lg mx-4 border border-parchment max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between p-5 border-b border-parchment">
+                  <h3 className="font-display text-display-md text-ink">AI Provider Settings</h3>
+                  <button
+                    onClick={() => setShowAISettings(false)}
+                    className="p-1 text-slate hover:text-ink transition-colors"
+                  >
+                    <X className="h-5 w-5" strokeWidth={1.5} />
+                  </button>
+                </div>
+                <div className="p-5">
+                  <AIProviderSettings onClose={() => setShowAISettings(false)} />
+                </div>
               </div>
             </div>
           )}
         </div>
       </header>
 
-      {/* Literature search modal */}
+      {/* Literature search modal - Editorial style */}
       {showSearchModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Search Literature</h3>
-            <p className="text-sm text-gray-600 mb-4">
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg p-6 w-full max-w-md mx-4 border border-parchment">
+            <h3 className="font-display text-display-md text-ink mb-4">Search Literature</h3>
+            <p className="font-body text-body-sm text-slate mb-5">
               Enter keywords or a topic to search for relevant academic papers via Semantic Scholar.
             </p>
             <input
@@ -1116,13 +1201,13 @@ export default function ConversationPage() {
                 }
               }}
               placeholder="e.g., team conflict performance"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent mb-4"
+              className="input-editorial mb-5"
               autoFocus
             />
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowSearchModal(false)}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="btn-editorial-secondary"
               >
                 Cancel
               </button>
@@ -1130,10 +1215,9 @@ export default function ConversationPage() {
                 onClick={() => executeSearchLiterature(searchQuery)}
                 disabled={!searchQuery.trim()}
                 className={cn(
-                  "px-4 py-2 text-sm rounded-lg transition-colors",
                   searchQuery.trim()
-                    ? "bg-primary text-white hover:bg-primary-800"
-                    : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    ? "btn-editorial-primary"
+                    : "btn-editorial bg-parchment text-slate-muted cursor-not-allowed"
                 )}
               >
                 Search
@@ -1143,23 +1227,23 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Output generation modal */}
+      {/* Output generation modal - Editorial style */}
       {showOutputModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col border border-parchment">
             {/* Modal header */}
-            <div className="p-6 border-b border-gray-200">
+            <div className="p-6 border-b border-parchment">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-800">Generate Output</h3>
+                <h3 className="font-display text-display-md text-ink">Generate Output</h3>
                 <button
                   onClick={() => setShowOutputModal(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  className="text-slate-muted hover:text-ink transition-colors"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-5 w-5" strokeWidth={1.5} />
                 </button>
               </div>
               {!generatedOutput && (
-                <p className="text-sm text-gray-600 mt-2">
+                <p className="font-body text-body-sm text-slate mt-2">
                   Choose the type of output you&apos;d like to generate from your conversation.
                 </p>
               )}
@@ -1172,10 +1256,10 @@ export default function ConversationPage() {
                   {/* Puzzle Statement option */}
                   <button
                     onClick={() => executeGenerateOutput("statement")}
-                    className="text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                    className="text-left p-5 border border-parchment rounded-sm hover:border-burgundy hover:bg-burgundy/5 transition-all duration-300"
                   >
-                    <h4 className="font-semibold text-gray-800 mb-1">Puzzle Statement</h4>
-                    <p className="text-sm text-gray-600">
+                    <h4 className="font-display text-display-md text-ink mb-1">Puzzle Statement</h4>
+                    <p className="font-body text-body-sm text-slate">
                       A polished 1-2 paragraph statement ready for your paper introduction.
                     </p>
                   </button>
@@ -1183,10 +1267,10 @@ export default function ConversationPage() {
                   {/* Introduction Draft option */}
                   <button
                     onClick={() => executeGenerateOutput("introduction")}
-                    className="text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                    className="text-left p-5 border border-parchment rounded-sm hover:border-burgundy hover:bg-burgundy/5 transition-all duration-300"
                   >
-                    <h4 className="font-semibold text-gray-800 mb-1">Introduction Draft</h4>
-                    <p className="text-sm text-gray-600">
+                    <h4 className="font-display text-display-md text-ink mb-1">Introduction Draft</h4>
+                    <p className="font-body text-body-sm text-slate">
                       A 2-3 page introduction draft with literature review and framing.
                     </p>
                   </button>
@@ -1194,10 +1278,10 @@ export default function ConversationPage() {
                   {/* Research Brief option */}
                   <button
                     onClick={() => executeGenerateOutput("brief")}
-                    className="text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                    className="text-left p-5 border border-parchment rounded-sm hover:border-burgundy hover:bg-burgundy/5 transition-all duration-300"
                   >
-                    <h4 className="font-semibold text-gray-800 mb-1">Research Brief</h4>
-                    <p className="text-sm text-gray-600">
+                    <h4 className="font-display text-display-md text-ink mb-1">Research Brief</h4>
+                    <p className="font-body text-body-sm text-slate">
                       A comprehensive 5-section document with puzzle, significance, literature, evidence needed, and approach.
                     </p>
                   </button>
@@ -1205,28 +1289,28 @@ export default function ConversationPage() {
               )}
 
               {isGenerating && (
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 text-primary animate-spin mb-4" />
-                  <p className="text-gray-600">Generating your {selectedOutputType === "statement" ? "puzzle statement" : selectedOutputType === "introduction" ? "introduction draft" : "research brief"}...</p>
+                <div className="flex flex-col items-center justify-center py-16">
+                  <Loader2 className="h-8 w-8 text-burgundy animate-spin mb-4" />
+                  <p className="font-body text-body-md text-slate">Generating your {selectedOutputType === "statement" ? "puzzle statement" : selectedOutputType === "introduction" ? "introduction draft" : "research brief"}...</p>
                 </div>
               )}
 
               {generatedOutput && !isGenerating && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-semibold text-gray-800 capitalize">
+                    <h4 className="font-display text-display-md text-ink">
                       {generatedOutput.type === "statement" ? "Puzzle Statement" :
-                       generatedOutput.type === "introduction" ? "Introduction Draft" :
-                       generatedOutput.type === "brief" ? "Research Brief" : "Output"}
+                        generatedOutput.type === "introduction" ? "Introduction Draft" :
+                          generatedOutput.type === "brief" ? "Research Brief" : "Output"}
                     </h4>
                     <button
                       onClick={() => copyToClipboard(generatedOutput.content)}
-                      className="text-sm text-primary hover:text-primary-800 transition-colors"
+                      className="font-sans text-body-sm text-burgundy hover:text-burgundy-900 transition-colors"
                     >
                       Copy to clipboard
                     </button>
                   </div>
-                  <div className="prose prose-sm max-w-none bg-gray-50 rounded-lg p-4 border border-gray-200 whitespace-pre-wrap">
+                  <div className="prose prose-sm max-w-none bg-cream rounded-sm p-5 border border-parchment whitespace-pre-wrap">
                     {generatedOutput.content}
                   </div>
                 </div>
@@ -1234,18 +1318,18 @@ export default function ConversationPage() {
             </div>
 
             {/* Modal footer */}
-            <div className="p-6 border-t border-gray-200 flex justify-between">
+            <div className="p-6 border-t border-parchment flex justify-between">
               {generatedOutput && !isGenerating ? (
                 <>
                   <button
                     onClick={() => setGeneratedOutput(null)}
-                    className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                    className="btn-editorial-secondary"
                   >
                     Generate Another
                   </button>
                   <button
                     onClick={() => setShowOutputModal(false)}
-                    className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary-800 transition-colors"
+                    className="btn-editorial-primary"
                   >
                     Done
                   </button>
@@ -1253,7 +1337,7 @@ export default function ConversationPage() {
               ) : (
                 <button
                   onClick={() => setShowOutputModal(false)}
-                  className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors ml-auto"
+                  className="btn-editorial-secondary ml-auto"
                 >
                   Cancel
                 </button>
@@ -1263,40 +1347,40 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Export modal */}
+      {/* Export modal - Editorial style */}
       {showExportModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg p-6 w-full max-w-md mx-4 border border-parchment">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">Export Session</h3>
+              <h3 className="font-display text-display-md text-ink">Export Session</h3>
               <button
                 onClick={() => setShowExportModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-slate-muted hover:text-ink transition-colors"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" strokeWidth={1.5} />
               </button>
             </div>
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="font-body text-body-sm text-slate mb-6">
               Choose what you&apos;d like to export from your session.
             </p>
             <div className="space-y-3">
               <button
                 onClick={handleExportConversation}
-                className="w-full text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                className="w-full text-left p-5 border border-parchment rounded-sm hover:border-burgundy hover:bg-burgundy/5 transition-all duration-300"
               >
-                <h4 className="font-semibold text-gray-800 mb-1">Export Conversation</h4>
-                <p className="text-sm text-gray-600">
+                <h4 className="font-display text-display-md text-ink mb-1">Export Conversation</h4>
+                <p className="font-body text-body-sm text-slate">
                   Full session with all messages, analysis results, and literature findings. Can be re-imported later.
                 </p>
               </button>
               <div
                 className={cn(
-                  "w-full text-left p-4 border border-gray-200 rounded-lg transition-colors",
+                  "w-full text-left p-5 border border-parchment rounded-sm transition-all duration-300",
                   session.puzzleArtifacts.length === 0 && "opacity-50"
                 )}
               >
-                <h4 className="font-semibold text-gray-800 mb-1">Export Outputs Only</h4>
-                <p className="text-sm text-gray-600 mb-3">
+                <h4 className="font-display text-display-md text-ink mb-1">Export Outputs Only</h4>
+                <p className="font-body text-body-sm text-slate mb-3">
                   {session.puzzleArtifacts.length > 0
                     ? `Export ${session.puzzleArtifacts.length} generated artifact(s) only.`
                     : "No outputs generated yet."}
@@ -1306,10 +1390,10 @@ export default function ConversationPage() {
                     onClick={handleExportOutputsOnly}
                     disabled={session.puzzleArtifacts.length === 0}
                     className={cn(
-                      "flex-1 px-3 py-2 text-sm rounded-lg border transition-colors",
+                      "flex-1 px-4 py-2 font-sans text-body-sm rounded-sm border transition-all duration-300",
                       session.puzzleArtifacts.length > 0
-                        ? "border-gray-300 hover:border-primary hover:bg-primary/5"
-                        : "cursor-not-allowed border-gray-200"
+                        ? "border-parchment-dark hover:border-burgundy hover:bg-burgundy/5 text-ink"
+                        : "cursor-not-allowed border-parchment text-slate-muted"
                     )}
                   >
                     JSON Format
@@ -1318,26 +1402,26 @@ export default function ConversationPage() {
                     onClick={handleExportOutputsPDF}
                     disabled={session.puzzleArtifacts.length === 0}
                     className={cn(
-                      "flex-1 px-3 py-2 text-sm rounded-lg border transition-colors flex items-center justify-center gap-1",
+                      "flex-1 px-4 py-2 font-sans text-body-sm rounded-sm border transition-all duration-300 flex items-center justify-center gap-1",
                       session.puzzleArtifacts.length > 0
-                        ? "border-gray-300 hover:border-primary hover:bg-primary/5"
-                        : "cursor-not-allowed border-gray-200"
+                        ? "border-parchment-dark hover:border-burgundy hover:bg-burgundy/5 text-ink"
+                        : "cursor-not-allowed border-parchment text-slate-muted"
                     )}
                   >
-                    <FileDown className="h-4 w-4" />
+                    <FileDown className="h-4 w-4" strokeWidth={1.5} />
                     PDF Format
                   </button>
                 </div>
               </div>
               <button
                 onClick={handleExportPDF}
-                className="w-full text-left p-4 border border-gray-200 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                className="w-full text-left p-5 border border-parchment rounded-sm hover:border-burgundy hover:bg-burgundy/5 transition-all duration-300"
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <FileDown className="h-5 w-5 text-primary" />
-                  <h4 className="font-semibold text-gray-800">Export as PDF</h4>
+                  <FileDown className="h-5 w-5 text-burgundy" strokeWidth={1.5} />
+                  <h4 className="font-display text-display-md text-ink">Export as PDF</h4>
                 </div>
-                <p className="text-sm text-gray-600">
+                <p className="font-body text-body-sm text-slate">
                   Polished, professional PDF document with outputs, literature findings, and conversation summary.
                 </p>
               </button>
@@ -1345,7 +1429,7 @@ export default function ConversationPage() {
             <div className="mt-6 flex justify-end">
               <button
                 onClick={() => setShowExportModal(false)}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="btn-editorial-secondary"
               >
                 Cancel
               </button>
@@ -1354,29 +1438,29 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Import modal */}
+      {/* Import modal - Editorial style */}
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg p-6 w-full max-w-md mx-4 border border-parchment">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">Import Session</h3>
+              <h3 className="font-display text-display-md text-ink">Import Session</h3>
               <button
                 onClick={() => setShowImportModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-slate-muted hover:text-ink transition-colors"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" strokeWidth={1.5} />
               </button>
             </div>
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="font-body text-body-sm text-slate mb-6">
               Import a previously exported session to continue where you left off.
             </p>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-              <FileUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600 mb-4">
+            <div className="border-2 border-dashed border-parchment-dark rounded-sm p-10 text-center bg-cream/50">
+              <FileUp className="h-12 w-12 text-slate-muted mx-auto mb-4" strokeWidth={1.5} />
+              <p className="font-body text-body-sm text-slate mb-5">
                 Select a JSON file to import
               </p>
               <label className="cursor-pointer">
-                <span className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-800 transition-colors">
+                <span className="btn-editorial-primary">
                   Choose File
                 </span>
                 <input
@@ -1390,7 +1474,7 @@ export default function ConversationPage() {
             <div className="mt-6 flex justify-end">
               <button
                 onClick={() => setShowImportModal(false)}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="btn-editorial-secondary"
               >
                 Cancel
               </button>
@@ -1399,20 +1483,20 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Unsaved Changes Warning Modal */}
+      {/* Unsaved Changes Warning Modal - Editorial style */}
       {showUnsavedWarning && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg p-6 w-full max-w-md mx-4 border border-parchment">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">Unsaved Changes</h3>
+              <h3 className="font-display text-display-md text-ink">Unsaved Changes</h3>
               <button
                 onClick={() => setShowUnsavedWarning(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-slate-muted hover:text-ink transition-colors"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" strokeWidth={1.5} />
               </button>
             </div>
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="font-body text-body-sm text-slate mb-6">
               You have unsaved work in this session. Would you like to export your session before leaving?
             </p>
             <div className="flex flex-col gap-3">
@@ -1421,7 +1505,7 @@ export default function ConversationPage() {
                   setShowUnsavedWarning(false);
                   setShowExportModal(true);
                 }}
-                className="w-full px-4 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors font-medium"
+                className="w-full btn-editorial-primary py-3"
               >
                 Export First
               </button>
@@ -1430,13 +1514,13 @@ export default function ConversationPage() {
                   setShowUnsavedWarning(false);
                   router.push('/');
                 }}
-                className="w-full px-4 py-3 bg-warning text-white rounded-lg hover:bg-warning/90 transition-colors font-medium"
+                className="w-full btn-editorial bg-gold text-ink border-gold hover:bg-gold-light py-3"
               >
                 Leave Without Saving
               </button>
               <button
                 onClick={() => setShowUnsavedWarning(false)}
-                className="w-full px-4 py-3 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="w-full btn-editorial-ghost py-3"
               >
                 Cancel
               </button>
@@ -1445,55 +1529,55 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* File Details Modal */}
+      {/* File Details Modal - Editorial style */}
       {selectedFileDetails && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary-600" />
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg max-w-md w-full mx-4 p-6 border border-parchment">
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="font-display text-display-md text-ink flex items-center gap-2">
+                <FileText className="h-5 w-5 text-burgundy" strokeWidth={1.5} />
                 File Details
               </h2>
               <button
                 onClick={() => setSelectedFileDetails(null)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-slate-muted hover:text-ink transition-colors"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" strokeWidth={1.5} />
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">File Name</label>
-                <p className="text-gray-800 font-medium mt-1">{selectedFileDetails.name}</p>
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">File Name</label>
+                <p className="font-body text-body-md text-ink font-medium mt-1">{selectedFileDetails.name}</p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Type</label>
-                <p className="text-gray-800 mt-1">{selectedFileDetails.type}</p>
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Type</label>
+                <p className="font-body text-body-md text-ink mt-1">{selectedFileDetails.type}</p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Size</label>
-                <p className="text-gray-800 mt-1">
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Size</label>
+                <p className="font-body text-body-md text-ink mt-1">
                   {selectedFileDetails.size < 1024
                     ? `${selectedFileDetails.size} bytes`
                     : selectedFileDetails.size < 1024 * 1024
-                    ? `${(selectedFileDetails.size / 1024).toFixed(1)} KB`
-                    : `${(selectedFileDetails.size / (1024 * 1024)).toFixed(1)} MB`
+                      ? `${(selectedFileDetails.size / 1024).toFixed(1)} KB`
+                      : `${(selectedFileDetails.size / (1024 * 1024)).toFixed(1)} MB`
                   }
                 </p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Uploaded At</label>
-                <p className="text-gray-800 mt-1">{new Date(selectedFileDetails.uploadedAt).toLocaleString()}</p>
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Uploaded At</label>
+                <p className="font-body text-body-md text-ink mt-1">{new Date(selectedFileDetails.uploadedAt).toLocaleString()}</p>
               </div>
 
               {selectedFileDetails.summary && (
                 <div>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Summary</label>
-                  <p className="text-gray-700 mt-1 text-sm">{selectedFileDetails.summary}</p>
+                  <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Summary</label>
+                  <p className="font-body text-body-sm text-slate mt-1">{selectedFileDetails.summary}</p>
                 </div>
               )}
             </div>
@@ -1504,13 +1588,13 @@ export default function ConversationPage() {
                   removeFile(selectedFileDetails.id);
                   setSelectedFileDetails(null);
                 }}
-                className="px-4 py-2 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
+                className="btn-editorial bg-error/10 text-error border-error/30 hover:bg-error/20"
               >
                 Remove File
               </button>
               <button
                 onClick={() => setSelectedFileDetails(null)}
-                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                className="btn-editorial-secondary"
               >
                 Close
               </button>
@@ -1519,58 +1603,88 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Paper Details Modal */}
+      {/* Paper Details Modal - Editorial style */}
       {selectedPaperDetails && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 p-6 max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-start mb-4">
-              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 pr-4">
-                <BookOpen className="h-5 w-5 text-primary-600 flex-shrink-0" />
-                Paper Details
-              </h2>
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg max-w-lg w-full mx-4 p-6 max-h-[80vh] overflow-y-auto border border-parchment">
+            <div className="flex justify-between items-start mb-5">
+              <div className="flex items-center gap-2 pr-4">
+                <BookOpen className="h-5 w-5 text-burgundy flex-shrink-0" strokeWidth={1.5} />
+                <h2 className="font-display text-display-md text-ink">Paper Details</h2>
+                <div className="flex gap-1 ml-2">
+                  {selectedPaperDetails.journalTier === "UTD24" && (
+                    <span className="px-2 py-0.5 font-sans text-caption font-medium bg-gold/20 text-gold-muted border border-gold/30 rounded-sm">
+                      UTD24
+                    </span>
+                  )}
+                  {selectedPaperDetails.journalTier === "Top Disciplinary" && (
+                    <span className="px-2 py-0.5 font-sans text-caption font-medium bg-burgundy/10 text-burgundy border border-burgundy/20 rounded-sm">
+                      Top Disciplinary
+                    </span>
+                  )}
+                  {selectedPaperDetails.isClassic && (
+                    <span className="px-2 py-0.5 font-sans text-caption font-medium bg-ink/10 text-ink border border-ink/20 rounded-sm">
+                      Classic
+                    </span>
+                  )}
+                </div>
+              </div>
               <button
                 onClick={() => setSelectedPaperDetails(null)}
-                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                className="text-slate-muted hover:text-ink flex-shrink-0 transition-colors"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" strokeWidth={1.5} />
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Title</label>
-                <p className="text-gray-800 font-medium mt-1 leading-snug">{selectedPaperDetails.title}</p>
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Title</label>
+                <p className="font-display text-body-lg text-ink font-medium mt-1 leading-snug">{selectedPaperDetails.title}</p>
               </div>
+
+              {selectedPaperDetails.journal && (
+                <div>
+                  <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Journal</label>
+                  <p className="font-body text-body-md text-ink mt-1 italic">{selectedPaperDetails.journal}</p>
+                </div>
+              )}
 
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Authors</label>
-                <p className="text-gray-800 mt-1">{selectedPaperDetails.authors.join(", ")}</p>
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Authors</label>
+                <p className="font-body text-body-md text-ink mt-1">{selectedPaperDetails.authors.join(", ")}</p>
               </div>
 
-              <div className="flex gap-6">
+              <div className="flex gap-8 flex-wrap">
                 <div>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Year</label>
-                  <p className="text-gray-800 mt-1">{selectedPaperDetails.year}</p>
+                  <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Year</label>
+                  <p className="font-body text-body-md text-ink mt-1">{selectedPaperDetails.year}</p>
                 </div>
                 {selectedPaperDetails.citationCount !== undefined && (
                   <div>
-                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Citations</label>
-                    <p className="text-gray-800 mt-1">{selectedPaperDetails.citationCount.toLocaleString()}</p>
+                    <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Citations</label>
+                    <p className="font-body text-body-md text-ink mt-1">{selectedPaperDetails.citationCount.toLocaleString()}</p>
+                  </div>
+                )}
+                {selectedPaperDetails.influentialCitationCount !== undefined && selectedPaperDetails.influentialCitationCount > 0 && (
+                  <div>
+                    <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Influential Citations</label>
+                    <p className="font-body text-body-md text-ink mt-1">{selectedPaperDetails.influentialCitationCount.toLocaleString()}</p>
                   </div>
                 )}
               </div>
 
               {selectedPaperDetails.isCrossDisciplinary && selectedPaperDetails.discipline && (
                 <div>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Discipline</label>
-                  <p className="text-primary-700 mt-1 font-medium">📚 {selectedPaperDetails.discipline} (Cross-disciplinary)</p>
+                  <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Discipline</label>
+                  <p className="font-body text-body-md text-burgundy mt-1 font-medium">{selectedPaperDetails.discipline} (Cross-disciplinary)</p>
                 </div>
               )}
 
               {selectedPaperDetails.abstract && (
                 <div>
-                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Abstract</label>
-                  <p className="text-gray-700 mt-1 text-sm leading-relaxed">{selectedPaperDetails.abstract}</p>
+                  <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Abstract</label>
+                  <p className="font-body text-body-sm text-slate mt-1 leading-relaxed">{selectedPaperDetails.abstract}</p>
                 </div>
               )}
             </div>
@@ -1581,14 +1695,14 @@ export default function ConversationPage() {
                   href={selectedPaperDetails.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
+                  className="btn-editorial-primary"
                 >
                   View on Semantic Scholar
                 </a>
               )}
               <button
                 onClick={() => setSelectedPaperDetails(null)}
-                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors ml-auto"
+                className="btn-editorial-secondary ml-auto"
               >
                 Close
               </button>
@@ -1597,36 +1711,36 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* Artifact Details Modal */}
+      {/* Artifact Details Modal - Editorial style */}
       {selectedArtifactDetails && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-start mb-4">
-              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 pr-4">
-                <FileOutput className="h-5 w-5 text-primary-600 flex-shrink-0" />
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg max-w-2xl w-full mx-4 p-6 max-h-[80vh] overflow-y-auto border border-parchment">
+            <div className="flex justify-between items-start mb-5">
+              <h2 className="font-display text-display-md text-ink flex items-center gap-2 pr-4">
+                <FileOutput className="h-5 w-5 text-burgundy flex-shrink-0" strokeWidth={1.5} />
                 {selectedArtifactDetails.type === "statement" ? "Puzzle Statement" :
-                 selectedArtifactDetails.type === "introduction" ? "Introduction Draft" :
-                 selectedArtifactDetails.type === "brief" ? "Research Brief" : "Output"}
-                <span className="text-sm font-normal text-gray-500">v{selectedArtifactDetails.version}</span>
+                  selectedArtifactDetails.type === "introduction" ? "Introduction Draft" :
+                    selectedArtifactDetails.type === "brief" ? "Research Brief" : "Output"}
+                <span className="font-sans text-body-sm font-normal text-slate-muted">v{selectedArtifactDetails.version}</span>
               </h2>
               <button
                 onClick={() => setSelectedArtifactDetails(null)}
-                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                className="text-slate-muted hover:text-ink flex-shrink-0 transition-colors"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" strokeWidth={1.5} />
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Created</label>
-                <p className="text-gray-800 mt-1">{new Date(selectedArtifactDetails.createdAt).toLocaleString()}</p>
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Created</label>
+                <p className="font-body text-body-md text-ink mt-1">{new Date(selectedArtifactDetails.createdAt).toLocaleString()}</p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Content</label>
-                <div className="mt-2 p-4 bg-gray-50 rounded-lg border border-gray-200 max-h-[50vh] overflow-y-auto">
-                  <p className="text-gray-700 text-sm whitespace-pre-wrap leading-relaxed">{selectedArtifactDetails.content}</p>
+                <label className="font-sans text-caption uppercase tracking-widest text-slate-muted">Content</label>
+                <div className="mt-2 p-5 bg-cream rounded-sm border border-parchment max-h-[50vh] overflow-y-auto">
+                  <p className="font-body text-body-sm text-ink whitespace-pre-wrap leading-relaxed">{selectedArtifactDetails.content}</p>
                 </div>
               </div>
             </div>
@@ -1634,13 +1748,13 @@ export default function ConversationPage() {
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => copyToClipboard(selectedArtifactDetails.content)}
-                className="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
+                className="btn-editorial-primary"
               >
                 Copy to Clipboard
               </button>
               <button
                 onClick={() => setSelectedArtifactDetails(null)}
-                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                className="btn-editorial-secondary"
               >
                 Close
               </button>
@@ -1661,18 +1775,18 @@ export default function ConversationPage() {
           )}
         >
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-6 space-y-5">
             {session.messages.map((message) => (
               <MessageBubble key={message.id} message={message} />
             ))}
 
             {isLoading && (
               <div className="flex justify-start">
-                <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm">
+                <div className="bg-white border border-parchment rounded-sm px-5 py-4 shadow-editorial">
                   <div className="flex space-x-2">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full typing-dot" />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full typing-dot" />
-                    <div className="w-2 h-2 bg-gray-400 rounded-full typing-dot" />
+                    <div className="w-2 h-2 bg-slate-muted rounded-full typing-dot" />
+                    <div className="w-2 h-2 bg-slate-muted rounded-full typing-dot" />
+                    <div className="w-2 h-2 bg-slate-muted rounded-full typing-dot" />
                   </div>
                 </div>
               </div>
@@ -1681,8 +1795,8 @@ export default function ConversationPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input area */}
-          <div className="border-t border-gray-200 bg-white p-4">
+          {/* Input area - Editorial style */}
+          <div className="border-t border-parchment bg-ivory p-5">
             {/* Hidden file input */}
             <input
               ref={fileInputRef}
@@ -1694,30 +1808,30 @@ export default function ConversationPage() {
 
             {/* Upload error message */}
             {uploadError && (
-              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">
+              <div className="mb-4 p-4 bg-error/5 border border-error/20 rounded-sm font-body text-body-sm text-error flex items-center justify-between">
                 <span>{uploadError}</span>
-                <button onClick={() => setUploadError(null)} className="text-red-500 hover:text-red-700">
-                  <X className="h-4 w-4" />
+                <button onClick={() => setUploadError(null)} className="text-error/70 hover:text-error">
+                  <X className="h-4 w-4" strokeWidth={1.5} />
                 </button>
               </div>
             )}
 
-            {/* Action buttons */}
-            <div className="flex gap-2 mb-3">
+            {/* Action buttons - Editorial style */}
+            <div className="flex gap-2 mb-4">
               <button
                 onClick={handleUpload}
                 disabled={isUploading}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                  "flex items-center gap-2 px-4 py-2 font-sans text-body-sm rounded-sm transition-colors",
                   isUploading
-                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                    : "text-gray-600 hover:bg-gray-100"
+                    ? "bg-parchment text-slate-muted cursor-not-allowed"
+                    : "text-slate hover:bg-cream hover:text-ink"
                 )}
               >
                 {isUploading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Upload className="h-4 w-4" />
+                  <Upload className="h-4 w-4" strokeWidth={1.5} />
                 )}
                 {isUploading ? "Uploading..." : "Upload File"}
               </button>
@@ -1725,30 +1839,30 @@ export default function ConversationPage() {
                 onClick={handleSearchLiterature}
                 disabled={isSearchingLiterature}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                  "flex items-center gap-2 px-4 py-2 font-sans text-body-sm rounded-sm transition-colors",
                   isSearchingLiterature
-                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                    : "text-gray-600 hover:bg-gray-100"
+                    ? "bg-parchment text-slate-muted cursor-not-allowed"
+                    : "text-slate hover:bg-cream hover:text-ink"
                 )}
               >
                 {isSearchingLiterature ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <BookOpen className="h-4 w-4" />
+                  <BookOpen className="h-4 w-4" strokeWidth={1.5} />
                 )}
                 {isSearchingLiterature ? "Searching literature..." : "Search Literature"}
               </button>
               <button
                 onClick={handleGenerateOutput}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="flex items-center gap-2 px-4 py-2 font-sans text-body-sm text-slate hover:bg-cream hover:text-ink rounded-sm transition-colors"
               >
-                <FileOutput className="h-4 w-4" />
+                <FileOutput className="h-4 w-4" strokeWidth={1.5} />
                 Generate Output
               </button>
             </div>
 
-            {/* Message input */}
-            <div className="flex gap-3">
+            {/* Message input - Editorial style */}
+            <div className="flex gap-4">
               <textarea
                 ref={inputRef}
                 value={input}
@@ -1756,9 +1870,11 @@ export default function ConversationPage() {
                 onKeyDown={handleKeyDown}
                 placeholder="Type your message..."
                 className={cn(
-                  "flex-1 resize-none rounded-xl border border-gray-300 px-4 py-3",
-                  "focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
-                  "placeholder:text-gray-400"
+                  "flex-1 resize-none rounded-sm border border-parchment-dark px-4 py-3",
+                  "font-body text-body-md text-ink bg-white",
+                  "focus:outline-none focus:ring-1 focus:ring-burgundy focus:border-burgundy",
+                  "placeholder:text-slate-muted",
+                  "shadow-editorial-inner"
                 )}
                 rows={1}
               />
@@ -1766,18 +1882,18 @@ export default function ConversationPage() {
                 onClick={handleSend}
                 disabled={!input.trim() || isLoading}
                 className={cn(
-                  "px-4 py-3 rounded-xl transition-colors",
+                  "px-5 py-3 rounded-sm transition-all duration-300",
                   "flex items-center justify-center",
                   input.trim() && !isLoading
-                    ? "bg-primary text-white hover:bg-primary-800"
-                    : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    ? "bg-burgundy text-ivory hover:bg-burgundy-900"
+                    : "bg-parchment text-slate-muted cursor-not-allowed"
                 )}
                 aria-label="Send message"
               >
                 {isLoading ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  <Send className="h-5 w-5" />
+                  <Send className="h-5 w-5" strokeWidth={1.5} />
                 )}
               </button>
             </div>
@@ -1789,17 +1905,17 @@ export default function ConversationPage() {
           <button
             onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
             className={cn(
-              "fixed bottom-24 right-4 z-20",
-              "bg-primary text-white rounded-full p-3 shadow-lg",
-              "hover:bg-primary-800 transition-colors",
+              "fixed bottom-28 right-4 z-20",
+              "bg-burgundy text-ivory rounded-sm p-3 shadow-editorial-md",
+              "hover:bg-burgundy-900 transition-colors",
               "flex items-center justify-center"
             )}
             aria-label={isContextPanelOpen ? "Close context panel" : "Open context panel"}
           >
             {isContextPanelOpen ? (
-              <X className="h-5 w-5" />
+              <X className="h-5 w-5" strokeWidth={1.5} />
             ) : (
-              <ChevronLeft className="h-5 w-5" />
+              <ChevronLeft className="h-5 w-5" strokeWidth={1.5} />
             )}
           </button>
         ) : (
@@ -1807,16 +1923,16 @@ export default function ConversationPage() {
             onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
             className={cn(
               "fixed right-0 top-1/2 -translate-y-1/2 z-10",
-              "bg-white border border-gray-200 rounded-l-lg p-2 shadow-sm",
-              "hover:bg-gray-50 transition-colors",
+              "bg-white border border-parchment rounded-l-sm p-2 shadow-editorial",
+              "hover:bg-cream transition-colors",
               isContextPanelOpen ? "right-80" : "right-0"
             )}
             aria-label={isContextPanelOpen ? "Close context panel" : "Open context panel"}
           >
             {isContextPanelOpen ? (
-              <ChevronRight className="h-5 w-5 text-gray-600" />
+              <ChevronRight className="h-5 w-5 text-slate" strokeWidth={1.5} />
             ) : (
-              <ChevronLeft className="h-5 w-5 text-gray-600" />
+              <ChevronLeft className="h-5 w-5 text-slate" strokeWidth={1.5} />
             )}
           </button>
         )}
@@ -1824,60 +1940,60 @@ export default function ConversationPage() {
         {/* Mobile backdrop overlay */}
         {isMobile && isContextPanelOpen && (
           <div
-            className="fixed inset-0 bg-black/50 z-30"
+            className="fixed inset-0 bg-ink/50 z-30"
             onClick={() => setIsContextPanelOpen(false)}
             aria-hidden="true"
           />
         )}
 
-        {/* Context panel - Bottom sheet on mobile, side panel on desktop */}
+        {/* Context panel - Editorial style */}
         <aside
           className={cn(
-            "fixed bg-white z-40 overflow-y-auto transition-transform duration-300",
+            "fixed bg-ivory z-40 overflow-y-auto transition-transform duration-300",
             isMobile
               ? // Mobile: bottom sheet
-                cn(
-                  "left-0 right-0 bottom-0 h-[70vh] rounded-t-2xl border-t border-gray-200 shadow-xl",
-                  isContextPanelOpen ? "translate-y-0" : "translate-y-full"
-                )
+              cn(
+                "left-0 right-0 bottom-0 h-[70vh] rounded-t-sm border-t border-parchment shadow-editorial-lg",
+                isContextPanelOpen ? "translate-y-0" : "translate-y-full"
+              )
               : // Desktop: side panel
-                cn(
-                  "right-0 top-[57px] bottom-0 w-80 border-l border-gray-200",
-                  isContextPanelOpen ? "translate-x-0" : "translate-x-full"
-                )
+              cn(
+                "right-0 top-[61px] bottom-0 w-80 border-l border-parchment",
+                isContextPanelOpen ? "translate-x-0" : "translate-x-full"
+              )
           )}
         >
           {/* Mobile drag handle */}
           {isMobile && (
-            <div className="sticky top-0 bg-white pt-3 pb-2 px-4 border-b border-gray-100">
-              <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-3" />
+            <div className="sticky top-0 bg-ivory pt-3 pb-2 px-5 border-b border-parchment">
+              <div className="w-12 h-1 bg-parchment-dark rounded-full mx-auto mb-3" />
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-800">Context</h2>
+                <h2 className="font-display text-display-md text-ink">Context</h2>
                 <button
                   onClick={() => setIsContextPanelOpen(false)}
-                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors rounded-full hover:bg-gray-100"
+                  className="p-2 text-slate-muted hover:text-ink transition-colors rounded-sm hover:bg-cream"
                   aria-label="Close panel"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-5 w-5" strokeWidth={1.5} />
                 </button>
               </div>
             </div>
           )}
 
-          <div className="p-4 space-y-6">
+          <div className="p-5 space-y-8">
             {/* Uploaded files */}
             <section>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              <h3 className="font-sans text-caption uppercase tracking-widest text-slate-muted mb-4">
                 Uploaded Files
               </h3>
               {session.uploadedFiles.length === 0 ? (
-                <p className="text-sm text-gray-500 italic">No files uploaded</p>
+                <p className="font-body text-body-sm text-slate-muted italic">No files uploaded</p>
               ) : (
                 <ul className="space-y-2">
                   {session.uploadedFiles.map((file) => (
                     <li
                       key={file.id}
-                      className="text-sm bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                      className="font-body text-body-sm bg-white border border-parchment rounded-sm p-3 cursor-pointer hover:border-burgundy/50 transition-colors"
                       onClick={() => setSelectedFileDetails(file)}
                       role="button"
                       tabIndex={0}
@@ -1888,10 +2004,10 @@ export default function ConversationPage() {
                         }
                       }}
                     >
-                      <div className="font-medium text-gray-700 truncate">
+                      <div className="font-medium text-ink truncate">
                         {file.name}
                       </div>
-                      <div className="text-xs text-gray-500">{file.type}</div>
+                      <div className="text-caption text-slate-muted">{file.type}</div>
                     </li>
                   ))}
                 </ul>
@@ -1900,32 +2016,31 @@ export default function ConversationPage() {
 
             {/* Analysis results */}
             <section>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              <h3 className="font-sans text-caption uppercase tracking-widest text-slate-muted mb-4">
                 Analysis Results
               </h3>
               {session.analysisResults.length === 0 ? (
-                <p className="text-sm text-gray-500 italic">No analysis run</p>
+                <p className="font-body text-body-sm text-slate-muted italic">No analysis run</p>
               ) : (
                 <ul className="space-y-2">
                   {session.analysisResults.map((result) => (
                     <li
                       key={result.id}
-                      className="text-sm bg-gray-50 rounded-lg p-3"
+                      className="font-body text-body-sm bg-white border border-parchment rounded-sm p-3"
                     >
-                      <div className="font-medium text-gray-700 capitalize">
+                      <div className="font-medium text-ink capitalize">
                         {result.type}
                       </div>
-                      <p className="text-xs text-gray-600 mt-1">
+                      <p className="text-caption text-slate mt-1">
                         {result.summary}
                       </p>
-                      {/* Show variable statistics if available */}
-                      {result.details?.variables && Array.isArray(result.details.variables) && (
+                      {Array.isArray(result.details?.variables) ? (
                         <div className="mt-2 space-y-1">
-                          <div className="text-xs font-medium text-gray-600">Variable Statistics:</div>
-                          {(result.details.variables as Array<{name: string; mean?: number; std?: number; median?: number; min?: number; max?: number; unique?: number; dtype: string}>).slice(0, 5).map((v, i) => (
-                            <div key={i} className="text-xs text-gray-500 pl-2 border-l-2 border-gray-200">
+                          <div className="text-caption font-medium text-slate">Variable Statistics:</div>
+                          {(result.details.variables as Array<{ name: string; mean?: number; std?: number; median?: number; min?: number; max?: number; unique?: number; dtype: string }>).slice(0, 5).map((v, i) => (
+                            <div key={i} className="text-caption text-slate-muted pl-2 border-l-2 border-parchment">
                               <span className="font-medium">{v.name}</span>
-                              <span className="text-gray-400"> ({v.dtype})</span>
+                              <span className="text-slate-muted"> ({v.dtype})</span>
                               {v.mean !== undefined && v.mean !== null && (
                                 <div className="pl-2 font-mono">
                                   Mean: {v.mean.toFixed(2)},
@@ -1939,58 +2054,55 @@ export default function ConversationPage() {
                             </div>
                           ))}
                           {(result.details.variables as Array<unknown>).length > 5 && (
-                            <div className="text-xs text-gray-400 pl-2">
+                            <div className="text-caption text-slate-muted pl-2">
                               +{(result.details.variables as Array<unknown>).length - 5} more variables...
                             </div>
                           )}
                         </div>
-                      )}
-                      {/* Show anomaly details if available */}
-                      {result.type === "anomaly" && result.details?.anomalies && Array.isArray(result.details.anomalies) && (result.details.anomalies as Array<unknown>).length > 0 && (
+                      ) : null}
+                      {result.type === "anomaly" && Array.isArray(result.details?.anomalies) && (result.details.anomalies as Array<unknown>).length > 0 ? (
                         <div className="mt-2 space-y-1">
-                          <div className="text-xs font-medium text-gray-600">Outliers Detected:</div>
-                          {(result.details.anomalies as Array<{variable: string; outlier_count: number; outlier_percentage: number}>).map((a, i) => (
-                            <div key={i} className="text-xs text-orange-600 pl-2 border-l-2 border-orange-200 font-mono">
+                          <div className="text-caption font-medium text-slate">Outliers Detected:</div>
+                          {(result.details.anomalies as Array<{ variable: string; outlier_count: number; outlier_percentage: number }>).map((a, i) => (
+                            <div key={i} className="text-caption text-gold pl-2 border-l-2 border-gold/30 font-mono">
                               <span className="font-medium">{a.variable}</span>: {a.outlier_count} outliers ({a.outlier_percentage.toFixed(1)}%)
                             </div>
                           ))}
                         </div>
-                      )}
-                      {/* Show theme details if available */}
-                      {result.type === "theme" && result.details?.themes && Array.isArray(result.details.themes) && (result.details.themes as Array<unknown>).length > 0 && (
+                      ) : null}
+                      {result.type === "theme" && Array.isArray(result.details?.themes) && (result.details.themes as Array<unknown>).length > 0 ? (
                         <div className="mt-2 space-y-1">
-                          <div className="text-xs font-medium text-gray-600">Themes Identified:</div>
-                          {(result.details.themes as Array<{theme: string; frequency: number; examples?: string[]}>).map((t, i) => (
-                            <div key={i} className="text-xs text-purple-600 pl-2 border-l-2 border-purple-200">
+                          <div className="text-caption font-medium text-slate">Themes Identified:</div>
+                          {(result.details.themes as Array<{ theme: string; frequency: number; examples?: string[] }>).map((t, i) => (
+                            <div key={i} className="text-caption text-burgundy pl-2 border-l-2 border-burgundy/30">
                               <span className="font-medium capitalize">{t.theme}</span>: {t.frequency} mentions
                             </div>
                           ))}
-                          {result.details.segment_count && (
-                            <div className="text-xs text-gray-400 mt-1">
-                              Analyzed {result.details.segment_count as number} text segments
+                          {typeof result.details.segment_count === 'number' ? (
+                            <div className="text-caption text-slate-muted mt-1">
+                              Analyzed {result.details.segment_count} text segments
                             </div>
-                          )}
+                          ) : null}
                         </div>
-                      )}
-                      {/* Show quote details if available */}
-                      {result.type === "quote" && result.details?.quotes && Array.isArray(result.details.quotes) && (result.details.quotes as Array<unknown>).length > 0 && (
+                      ) : null}
+                      {result.type === "quotes" && Array.isArray(result.details?.quotes) && (result.details.quotes as Array<unknown>).length > 0 ? (
                         <div className="mt-2 space-y-2">
-                          <div className="text-xs font-medium text-gray-600">Surprising Quotes:</div>
-                          {(result.details.quotes as Array<{text: string; source: string; type: string; context?: string}>).slice(0, 3).map((q, i) => (
-                            <div key={i} className="text-xs text-blue-700 pl-2 border-l-2 border-blue-200 space-y-1">
+                          <div className="text-caption font-medium text-slate">Surprising Quotes:</div>
+                          {(result.details.quotes as Array<{ text: string; source: string; type: string; context?: string }>).slice(0, 3).map((q, i) => (
+                            <div key={i} className="text-caption text-ink pl-2 border-l-2 border-burgundy/30 space-y-1">
                               <div className="italic">&ldquo;{q.text.slice(0, 100)}{q.text.length > 100 ? "..." : ""}&rdquo;</div>
-                              <div className="text-blue-500 text-[10px]">{q.source} &bull; {q.type}</div>
+                              <div className="text-slate-muted text-[10px]">{q.source} &bull; {q.type}</div>
                             </div>
                           ))}
-                          {(result.details.quotes as Array<unknown>).length > 3 && (
-                            <div className="text-xs text-gray-400">
+                          {(result.details.quotes as Array<unknown>).length > 3 ? (
+                            <div className="text-caption text-slate-muted">
                               +{(result.details.quotes as Array<unknown>).length - 3} more quotes...
                             </div>
-                          )}
+                          ) : null}
                         </div>
-                      )}
+                      ) : null}
                       {result.rigorWarnings.length > 0 && (
-                        <div className="mt-2 text-xs text-warning">
+                        <div className="mt-2 text-caption text-gold">
                           ⚠️ {result.rigorWarnings.length} warning(s)
                         </div>
                       )}
@@ -2002,11 +2114,11 @@ export default function ConversationPage() {
 
             {/* Literature findings */}
             <section>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              <h3 className="font-sans text-caption uppercase tracking-widest text-slate-muted mb-4">
                 Literature Findings
               </h3>
               {session.literatureFindings.length === 0 ? (
-                <p className="text-sm text-gray-500 italic">
+                <p className="font-body text-body-sm text-slate-muted italic">
                   No literature searched
                 </p>
               ) : (
@@ -2014,7 +2126,7 @@ export default function ConversationPage() {
                   {session.literatureFindings.map((paper) => (
                     <li
                       key={paper.id}
-                      className="text-sm bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                      className="font-body text-body-sm bg-white border border-parchment rounded-sm p-3 cursor-pointer hover:border-burgundy/50 transition-colors"
                       onClick={() => setSelectedPaperDetails(paper)}
                       role="button"
                       tabIndex={0}
@@ -2025,16 +2137,47 @@ export default function ConversationPage() {
                         }
                       }}
                     >
-                      <div className="font-medium text-gray-700 leading-snug hover:text-primary-700">
-                        {paper.title}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-medium text-ink leading-snug hover:text-burgundy flex-1">
+                          {paper.title}
+                        </div>
+                        <div className="flex gap-1 flex-shrink-0">
+                          {paper.journalTier === "UTD24" && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-sans font-medium bg-gold/20 text-gold-muted rounded-sm">
+                              UTD24
+                            </span>
+                          )}
+                          {paper.journalTier === "Top Disciplinary" && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-sans font-medium bg-burgundy/10 text-burgundy rounded-sm">
+                              Top
+                            </span>
+                          )}
+                          {paper.isClassic && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-sans font-medium bg-ink/10 text-ink rounded-sm">
+                              Classic
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {paper.authors.slice(0, 3).join(", ")}
-                        {paper.authors.length > 3 && " et al."} ({paper.year})
+                      {paper.journal && (
+                        <div className="text-caption text-slate italic mt-1">
+                          {paper.journal}
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="text-caption text-slate-muted">
+                          {paper.authors.slice(0, 2).join(", ")}
+                          {paper.authors.length > 2 && " et al."} ({paper.year})
+                        </div>
+                        {paper.citationCount !== undefined && (
+                          <div className="text-caption text-slate-muted">
+                            {paper.citationCount.toLocaleString()} cites
+                          </div>
+                        )}
                       </div>
                       {paper.isCrossDisciplinary && (
-                        <div className="mt-1 text-xs text-primary">
-                          📚 {paper.discipline}
+                        <div className="mt-1 text-caption text-burgundy">
+                          Cross-disciplinary: {paper.discipline}
                         </div>
                       )}
                     </li>
@@ -2045,11 +2188,11 @@ export default function ConversationPage() {
 
             {/* Generated outputs */}
             <section>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              <h3 className="font-sans text-caption uppercase tracking-widest text-slate-muted mb-4">
                 Generated Outputs
               </h3>
               {session.puzzleArtifacts.length === 0 ? (
-                <p className="text-sm text-gray-500 italic">
+                <p className="font-body text-body-sm text-slate-muted italic">
                   No outputs generated
                 </p>
               ) : (
@@ -2057,7 +2200,7 @@ export default function ConversationPage() {
                   {session.puzzleArtifacts.map((artifact) => (
                     <li
                       key={artifact.id}
-                      className="text-sm bg-gray-50 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                      className="font-body text-body-sm bg-white border border-parchment rounded-sm p-3 cursor-pointer hover:border-burgundy/50 transition-colors"
                       onClick={() => setSelectedArtifactDetails(artifact)}
                       role="button"
                       tabIndex={0}
@@ -2068,13 +2211,13 @@ export default function ConversationPage() {
                         }
                       }}
                     >
-                      <div className="font-medium text-gray-700 leading-snug hover:text-primary-700">
+                      <div className="font-medium text-ink leading-snug hover:text-burgundy">
                         {artifact.type === "statement" ? "Puzzle Statement" :
-                         artifact.type === "introduction" ? "Introduction Draft" :
-                         artifact.type === "brief" ? "Research Brief" : artifact.type}
-                        <span className="ml-2 text-xs text-gray-500">v{artifact.version}</span>
+                          artifact.type === "introduction" ? "Introduction Draft" :
+                            artifact.type === "brief" ? "Research Brief" : artifact.type}
+                        <span className="ml-2 text-caption text-slate-muted">v{artifact.version}</span>
                       </div>
-                      <div className="text-xs text-gray-500 mt-1">
+                      <div className="text-caption text-slate-muted mt-1">
                         {new Date(artifact.createdAt).toLocaleString()}
                       </div>
                     </li>
@@ -2089,7 +2232,7 @@ export default function ConversationPage() {
   );
 }
 
-// Message bubble component
+// Message bubble component - Editorial style
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
 
@@ -2102,17 +2245,17 @@ function MessageBubble({ message }: { message: Message }) {
     >
       <div
         className={cn(
-          "max-w-[80%] rounded-2xl px-4 py-3 shadow-sm",
+          "max-w-[80%] rounded-sm px-5 py-4",
           isUser
-            ? "bg-primary text-white rounded-br-md"
-            : "bg-white border border-gray-200 text-gray-800 rounded-bl-md"
+            ? "bg-burgundy text-ivory shadow-editorial"
+            : "bg-white border border-parchment text-ink shadow-editorial"
         )}
       >
-        <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+        <p className="font-body text-body-md whitespace-pre-wrap leading-relaxed">{message.content}</p>
         <div
           className={cn(
-            "text-xs mt-2",
-            isUser ? "text-primary-100" : "text-gray-400"
+            "font-sans text-caption mt-3",
+            isUser ? "text-ivory/60" : "text-slate-muted"
           )}
         >
           {formatTimestamp(message.timestamp)}

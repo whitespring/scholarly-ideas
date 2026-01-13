@@ -75,3 +75,6 @@ features.db
 # Uploaded files (processed transiently)
 uploads/
 temp/
+assistant.db
+.claude_assistant_settings.json
+.playwright-mcp/

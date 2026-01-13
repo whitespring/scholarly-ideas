@@ -3,9 +3,12 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/context/SessionContext";
+import { useAISettings } from "@/context/AISettingsContext";
 import { SUBFIELDS, type EntryMode, type Subfield } from "@/types";
 import { cn } from "@/lib/utils";
-import { Lightbulb, Database, Compass, ChevronDown, Upload } from "lucide-react";
+import { Lightbulb, Database, Compass, ChevronDown, Upload, Download, Settings, X } from "lucide-react";
+import { AIProviderSettings } from "@/components/settings/AIProviderSettings";
+import { PROVIDER_CONFIGS } from "@/lib/ai/config";
 
 interface EntryModeCard {
   mode: EntryMode;
@@ -40,10 +43,15 @@ const entryModes: EntryModeCard[] = [
 
 export default function WelcomePage() {
   const router = useRouter();
-  const { initSession, importSession } = useSession();
+  const { session, initSession, importSession } = useSession();
+  const { settings: aiSettings, isConfigured: isAIConfigured } = useAISettings();
   const [selectedSubfield, setSelectedSubfield] = useState<Subfield | "">("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [showAISettings, setShowAISettings] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check if there's an existing session with content
+  const hasExistingSession = session.messages.length > 0;
 
   const handleModeSelect = (mode: EntryMode) => {
     initSession(mode, selectedSubfield || undefined);
@@ -52,6 +60,17 @@ export default function WelcomePage() {
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleExportSession = () => {
+    const dataStr = JSON.stringify(session, null, 2);
+    const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`;
+    const exportName = `scholarly-ideas-${new Date().toISOString().split("T")[0]}.json`;
+
+    const linkElement = document.createElement("a");
+    linkElement.setAttribute("href", dataUri);
+    linkElement.setAttribute("download", exportName);
+    linkElement.click();
   };
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,10 +109,45 @@ export default function WelcomePage() {
             <h1 className="font-display text-display-md text-ink tracking-tight">
               Scholarly Ideas
             </h1>
-            <div className="h-px w-24 bg-burgundy/30" />
+            <div className="flex items-center gap-4">
+              <div className="h-px w-24 bg-burgundy/30" />
+              <button
+                onClick={() => setShowAISettings(true)}
+                className={cn(
+                  "p-2.5 rounded-sm transition-colors",
+                  !isAIConfigured
+                    ? "text-burgundy bg-burgundy/10 hover:bg-burgundy/20"
+                    : "text-slate hover:text-ink hover:bg-cream"
+                )}
+                aria-label="AI Settings"
+                title={isAIConfigured ? `Using ${PROVIDER_CONFIGS[aiSettings.provider]?.name || 'AI'}` : "Configure AI Provider"}
+              >
+                <Settings className="h-5 w-5" strokeWidth={1.5} />
+              </button>
+            </div>
           </div>
         </div>
       </header>
+
+      {/* AI Settings Modal */}
+      {showAISettings && (
+        <div className="fixed inset-0 bg-ink/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-sm shadow-editorial-lg w-full max-w-lg mx-4 border border-parchment max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-parchment">
+              <h3 className="font-display text-display-md text-ink">AI Provider Settings</h3>
+              <button
+                onClick={() => setShowAISettings(false)}
+                className="p-1 text-slate hover:text-ink transition-colors"
+              >
+                <X className="h-5 w-5" strokeWidth={1.5} />
+              </button>
+            </div>
+            <div className="p-5">
+              <AIProviderSettings onClose={() => setShowAISettings(false)} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="max-w-4xl mx-auto px-6 py-20 relative">
@@ -217,7 +271,7 @@ export default function WelcomePage() {
           })}
         </div>
 
-        {/* Footer note with import option - editorial style */}
+        {/* Footer note with session options - editorial style */}
         <div className="text-center mt-20">
           <div className="editorial-divider max-w-xs mx-auto mb-8" />
           <p className="font-body text-body-sm text-slate-muted mb-6 max-w-lg mx-auto">
@@ -229,21 +283,42 @@ export default function WelcomePage() {
             </span>
           </p>
 
-          {/* Import previous session button - editorial style */}
-          <button
-            onClick={handleImportClick}
-            className={cn(
-              "inline-flex items-center gap-2 px-5 py-2.5",
-              "font-sans text-body-sm text-burgundy",
-              "border border-burgundy/30 rounded-sm",
-              "hover:bg-burgundy/5 hover:border-burgundy/50",
-              "transition-all duration-300",
-              "focus:outline-none focus:ring-1 focus:ring-burgundy focus:ring-offset-2 focus:ring-offset-ivory"
+          {/* Session buttons - editorial style */}
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            {/* Export current session - only show if there's content */}
+            {hasExistingSession && (
+              <button
+                onClick={handleExportSession}
+                className={cn(
+                  "inline-flex items-center gap-2 px-5 py-2.5",
+                  "font-sans text-body-sm text-ivory bg-burgundy",
+                  "border border-burgundy rounded-sm",
+                  "hover:bg-burgundy-dark",
+                  "transition-all duration-300",
+                  "focus:outline-none focus:ring-1 focus:ring-burgundy focus:ring-offset-2 focus:ring-offset-ivory"
+                )}
+              >
+                <Download className="h-4 w-4" strokeWidth={1.5} />
+                Export current session
+              </button>
             )}
-          >
-            <Upload className="h-4 w-4" strokeWidth={1.5} />
-            Import previous session
-          </button>
+
+            {/* Import previous session */}
+            <button
+              onClick={handleImportClick}
+              className={cn(
+                "inline-flex items-center gap-2 px-5 py-2.5",
+                "font-sans text-body-sm text-burgundy",
+                "border border-burgundy/30 rounded-sm",
+                "hover:bg-burgundy/5 hover:border-burgundy/50",
+                "transition-all duration-300",
+                "focus:outline-none focus:ring-1 focus:ring-burgundy focus:ring-offset-2 focus:ring-offset-ivory"
+              )}
+            >
+              <Upload className="h-4 w-4" strokeWidth={1.5} />
+              Import session
+            </button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -252,9 +327,23 @@ export default function WelcomePage() {
             className="hidden"
             aria-label="Import session file"
           />
-          <p className="font-body text-caption text-slate-muted mt-3">
-            Lost your work? Import a previously exported session to continue.
-          </p>
+
+          {/* Continue existing session hint */}
+          {hasExistingSession ? (
+            <p className="font-body text-caption text-slate-muted mt-3">
+              You have an active session with {session.messages.length} messages.{" "}
+              <button
+                onClick={() => router.push("/conversation")}
+                className="text-burgundy hover:underline"
+              >
+                Continue working
+              </button>
+            </p>
+          ) : (
+            <p className="font-body text-caption text-slate-muted mt-3">
+              Lost your work? Import a previously exported session to continue.
+            </p>
+          )}
         </div>
       </div>
 

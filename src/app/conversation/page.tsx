@@ -1034,7 +1034,7 @@ export default function ConversationPage() {
       )}
 
       {/* Header - Editorial style */}
-      <header className="border-b border-parchment bg-ivory px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-parchment bg-ivory px-6 py-4 flex items-center justify-between relative z-10">
         <div className="flex items-center gap-6">
           <button
             onClick={handleNavigateHome}
@@ -1049,7 +1049,7 @@ export default function ConversationPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="relative flex items-center gap-2">
           {/* Export button */}
           <button
             onClick={() => setShowExportModal(true)}
@@ -1086,7 +1086,7 @@ export default function ConversationPage() {
 
           {/* Settings dropdown - Editorial style */}
           {showSettings && (
-            <div className="absolute top-16 right-4 bg-white rounded-sm shadow-editorial-lg border border-parchment p-5 z-20 w-72">
+            <div className="absolute top-full right-0 mt-2 bg-white rounded-sm shadow-editorial-lg border border-parchment p-5 z-20 w-72">
               <div className="space-y-5">
                 <label className="flex items-center justify-between cursor-pointer">
                   <span className="font-sans text-body-sm text-ink">Be Direct</span>
@@ -1764,7 +1764,7 @@ export default function ConversationPage() {
       )}
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative z-0">
         {/* Conversation area */}
         <div
           className={cn(

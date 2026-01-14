@@ -334,7 +334,7 @@ export default function ConversationPage() {
       // Add a message to the conversation about the upload
       addMessage({
         role: "assistant",
-        content: `I've received your data file "${file.name}". Here's a quick summary:\n\n**File Details:**\n- ${data.summary.rows} observations (rows)\n- ${data.summary.columns} variables (columns)\n- Format: ${data.summary.file_type.toUpperCase()}\n\n${numericVars.length > 0 ? `**Numeric Variables:** ${numericVars.map((v: { name: string }) => v.name).join(", ")}\n\n` : ""}${categoricalVars.length > 0 ? `**Categorical Variables:** ${categoricalVars.map((v: { name: string }) => v.name).join(", ")}\n\n` : ""}What stands out to you in this data? What patterns or surprises did you notice when collecting it?`,
+        content: `Ich habe Ihre Datendatei "${file.name}" erhalten. Hier ist eine kurze Zusammenfassung:\n\n**Datei-Details:**\n- ${data.summary.rows} Beobachtungen (Zeilen)\n- ${data.summary.columns} Variablen (Spalten)\n- Format: ${data.summary.file_type.toUpperCase()}\n\n${numericVars.length > 0 ? `**Numerische Variablen:** ${numericVars.map((v: { name: string }) => v.name).join(", ")}\n\n` : ""}${categoricalVars.length > 0 ? `**Kategorische Variablen:** ${categoricalVars.map((v: { name: string }) => v.name).join(", ")}\n\n` : ""}Was fällt Ihnen an diesen Daten auf? Welche Muster oder Überraschungen haben Sie beim Sammeln bemerkt?`,
         metadata: { phase: "probing", analysisTriggered: true },
       });
 
@@ -1003,7 +1003,7 @@ export default function ConversationPage() {
         // Add a welcome back message
         addMessage({
           role: "assistant",
-          content: `Welcome back! I've restored your previous session from ${importedSession.exportedAt ? new Date(importedSession.exportedAt).toLocaleDateString() : "an earlier date"}. You had ${importedSession.messages.length} messages in your conversation. Let's continue where you left off.`,
+          content: `Willkommen zurück! Ich habe Ihre vorherige Sitzung vom ${importedSession.exportedAt ? new Date(importedSession.exportedAt).toLocaleDateString("de-DE") : "einem früheren Datum"} wiederhergestellt. Sie hatten ${importedSession.messages.length} Nachrichten in Ihrer Konversation. Lassen Sie uns dort weitermachen, wo Sie aufgehört haben.`,
         });
       } catch (error) {
         console.error("Import error:", error);
@@ -1313,8 +1313,47 @@ export default function ConversationPage() {
                       Copy to clipboard
                     </button>
                   </div>
-                  <div className="prose prose-sm max-w-none bg-cream rounded-sm p-5 border border-parchment whitespace-pre-wrap">
-                    {generatedOutput.content}
+                  <div className="prose prose-sm max-w-none bg-cream rounded-sm p-5 border border-parchment">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
+                      components={{
+                        p: ({ children }) => (
+                          <p className="mb-3 leading-relaxed">{children}</p>
+                        ),
+                        h1: ({ children }) => (
+                          <h1 className="text-xl font-display font-medium mb-3 mt-4 first:mt-0">{children}</h1>
+                        ),
+                        h2: ({ children }) => (
+                          <h2 className="text-lg font-display font-medium mb-3 mt-4 first:mt-0">{children}</h2>
+                        ),
+                        h3: ({ children }) => (
+                          <h3 className="text-lg font-display font-medium mb-2 mt-3 first:mt-0">{children}</h3>
+                        ),
+                        ul: ({ children }) => (
+                          <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>
+                        ),
+                        li: ({ children }) => (
+                          <li className="leading-relaxed">{children}</li>
+                        ),
+                        strong: ({ children }) => (
+                          <strong className="font-semibold">{children}</strong>
+                        ),
+                        em: ({ children }) => (
+                          <em className="italic">{children}</em>
+                        ),
+                        blockquote: ({ children }) => (
+                          <blockquote className="border-l-4 border-parchment pl-4 italic my-3">
+                            {children}
+                          </blockquote>
+                        ),
+                      }}
+                    >
+                      {generatedOutput.content}
+                    </ReactMarkdown>
                   </div>
                 </div>
               )}

@@ -298,15 +298,15 @@ async function expandQuery(query: string, aiConfig: AIRequestConfig): Promise<st
   try {
     console.log(`[Query Expansion] Expanding conceptual query: "${query}"`);
     const text = await generateAIResponse(aiConfig, {
-      system: "You are an academic research assistant. Always respond with valid JSON only.",
+      system: "Sie sind ein akademischer Forschungsassistent. Antworten Sie immer nur mit gültigem JSON.",
       messages: [{
         role: "user",
-        content: `Convert this conceptual research query into 3-5 targeted academic search terms for finding relevant papers in management/organizational research. Return ONLY a JSON array of strings, no explanation.
+        content: `Wandeln Sie diese konzeptionelle Forschungsanfrage in 3-5 gezielte akademische Suchbegriffe um, um relevante Papers in Management/Organisationsforschung zu finden. Geben Sie NUR ein JSON-Array von Strings zurück, keine Erklärung.
 
-Query: "${query}"
+Anfrage: "${query}"
 
-Example input: "the tension between organizational change and inertia"
-Example output: ["organizational inertia", "resistance to change", "organizational adaptation", "change management"]`
+Beispiel-Input: "the tension between organizational change and inertia"
+Beispiel-Output: ["organizational inertia", "resistance to change", "organizational adaptation", "change management"]`
       }],
       maxTokens: 200,
     });
@@ -342,21 +342,21 @@ async function generateTier1Terms(query: string, aiConfig: AIRequestConfig): Pro
   try {
     console.log(`[Tier 1] Generating synonyms for: "${query}"`);
     const text = await generateAIResponse(aiConfig, {
-      system: "You are an academic research assistant. Always respond with valid JSON only.",
+      system: "Sie sind ein akademischer Forschungsassistent. Antworten Sie immer nur mit gültigem JSON.",
       messages: [{
         role: "user",
-        content: `Generate 3-5 synonym phrases for this research topic.
-These should mean the SAME THING using different words.
-Do NOT broaden or abstract - keep exact same meaning.
+        content: `Generieren Sie 3-5 Synonym-Phrasen für dieses Forschungsthema.
+Diese sollten DASSELBE bedeuten, aber andere Wörter verwenden.
+Erweitern oder abstrahieren Sie NICHT - behalten Sie exakt dieselbe Bedeutung.
 
-Query: "${query}"
+Anfrage: "${query}"
 
-Examples:
+Beispiele:
 - "team breakups" → ["team dissolution", "team separation", "team splits"]
 - "knowledge transfer" → ["knowledge sharing", "knowledge exchange"]
 - "organizational change resistance" → ["resistance to change", "employee change resistance"]
 
-Return ONLY a JSON array of strings.`
+Geben Sie NUR ein JSON-Array von Strings zurück.`
       }],
       maxTokens: 200,
     });
@@ -380,22 +380,22 @@ async function generateTier2Terms(query: string, tier1Terms: string[], aiConfig:
   try {
     console.log(`[Tier 2] Generating context-abstracted terms for: "${query}"`);
     const text = await generateAIResponse(aiConfig, {
-      system: "You are an academic research assistant. Always respond with valid JSON only.",
+      system: "Sie sind ein akademischer Forschungsassistent. Antworten Sie immer nur mit gültigem JSON.",
       messages: [{
         role: "user",
-        content: `Generate 3-5 search terms that study the SAME CONSTRUCTS/RELATIONSHIPS but in DIFFERENT CONTEXTS.
+        content: `Generieren Sie 3-5 Suchbegriffe, die DIESELBEN KONSTRUKTE/BEZIEHUNGEN untersuchen, aber in UNTERSCHIEDLICHEN KONTEXTEN.
 
-Original query: "${query}"
-Already searched: ${JSON.stringify(tier1Terms)}
+Ursprüngliche Anfrage: "${query}"
+Bereits gesucht: ${JSON.stringify(tier1Terms)}
 
-Abstract the context (industry, setting, population) but keep the core ideas/relationships intact.
+Abstrahieren Sie den Kontext (Branche, Setting, Population), aber behalten Sie die Kern-Ideen/Beziehungen intakt.
 
-Examples:
+Beispiele:
 - "entrepreneurial team breakups" → ["organizational team dissolution", "partnership breakup", "co-founder exits", "business partner separation"]
 - "startup innovation" → ["firm innovation", "organizational innovation", "SME innovation"]
 - "family firm succession" → ["organizational succession", "leadership succession", "CEO succession"]
 
-Return ONLY a JSON array of strings.`
+Geben Sie NUR ein JSON-Array von Strings zurück.`
       }],
       maxTokens: 200,
     });
@@ -419,22 +419,22 @@ async function generateTier3Terms(query: string, tier1Terms: string[], tier2Term
   try {
     console.log(`[Tier 3] Generating foundational theory terms for: "${query}"`);
     const text = await generateAIResponse(aiConfig, {
-      system: "You are an academic research assistant. Always respond with valid JSON only.",
+      system: "Sie sind ein akademischer Forschungsassistent. Antworten Sie immer nur mit gültigem JSON.",
       messages: [{
         role: "user",
-        content: `Generate 3-5 search terms for FOUNDATIONAL THEORIES that help understand the mechanisms underlying this topic.
+        content: `Generieren Sie 3-5 Suchbegriffe für GRUNDLEGENDE THEORIEN, die helfen, die Mechanismen zu verstehen, die diesem Thema zugrunde liegen.
 
-Original query: "${query}"
-Already searched: ${JSON.stringify([...tier1Terms, ...tier2Terms])}
+Ursprüngliche Anfrage: "${query}"
+Bereits gesucht: ${JSON.stringify([...tier1Terms, ...tier2Terms])}
 
-Focus on theoretical frameworks, foundational constructs, and established research streams that illuminate WHY the phenomenon occurs.
+Fokussieren Sie auf theoretische Frameworks, grundlegende Konstrukte und etablierte Forschungsströme, die erklären WARUM das Phänomen auftritt.
 
-Examples:
+Beispiele:
 - "entrepreneurial team breakups" → ["relationship dissolution theory", "team conflict dynamics", "organizational exit processes", "social exchange breakdown"]
 - "startup failure" → ["organizational decline", "liability of newness", "resource dependence theory"]
 - "knowledge transfer barriers" → ["absorptive capacity", "organizational learning theory", "knowledge stickiness"]
 
-Return ONLY a JSON array of strings.`
+Geben Sie NUR ein JSON-Array von Strings zurück.`
       }],
       maxTokens: 200,
     });
@@ -482,23 +482,23 @@ Abstract: ${p.abstract}`)
       .join("\n\n---\n\n");
 
     const analysis = await generateAIResponse(aiConfig, {
-      system: `You are a research methodology expert helping a ${subfield || "management"} scholar discover research puzzles.`,
+      system: `Sie sind ein Experte für Forschungsmethodik und helfen einem ${subfield || "Management"}-Forscher, Research Puzzles zu entdecken.`,
       messages: [{
         role: "user",
-        content: `The researcher searched for: "${originalQuery}"
+        content: `Der Forscher hat gesucht nach: "${originalQuery}"
 
-Here are the most relevant papers found:
+Hier sind die relevantesten gefundenen Papers:
 
 ${papersContext}
 
-Based on these papers, provide a thoughtful analysis (3-4 paragraphs) that:
-1. Identifies the main themes and debates across these papers
-2. Highlights gaps, tensions, contradictions, or unanswered questions in the literature
-3. Suggests potential research puzzles that emerge from this literature - identify as many as genuinely emerge, not limited to any specific number
+Basierend auf diesen Papers, erstellen Sie eine durchdachte Analyse (3-4 Absätze), die:
+1. Die Hauptthemen und Debatten über diese Papers hinweg identifiziert
+2. Lücken, Spannungen, Widersprüche oder unbeantwortete Fragen in der Literatur hervorhebt
+3. Potenzielle Research Puzzles vorschlägt, die sich aus dieser Literatur ergeben - identifizieren Sie so viele, wie sich genuine ergeben, nicht limitiert auf eine bestimmte Anzahl
 
-End with an open question to help the researcher think about how their interest relates to or challenges this existing work.
+Enden Sie mit einer offenen Frage, um dem Forscher zu helfen darüber nachzudenken, wie ihr Interesse sich auf diese bestehende Arbeit bezieht oder sie herausfordert.
 
-Keep your response focused and actionable - this should spark thinking, not overwhelm.`
+Halten Sie Ihre Antwort fokussiert und umsetzbar - dies sollte Denken anstoßen, nicht überwältigen.`
       }],
       maxTokens: 1200,
     });
@@ -840,19 +840,19 @@ When in doubt, INCLUDE the paper.`;
 
   try {
     const text = await generateAIResponse(aiConfig, {
-      system: "You are an academic research assistant. Always respond with valid JSON only.",
+      system: "Sie sind ein akademischer Forschungsassistent. Antworten Sie immer nur mit gültigem JSON.",
       messages: [{
         role: "user",
-        content: `The user searched for: "${originalQuery}"
+        content: `Der User hat gesucht nach: "${originalQuery}"
 
-Evaluate these ${paperSummaries.length} papers and return ONLY a JSON array of the indices of relevant papers.
+Evaluieren Sie diese ${paperSummaries.length} Papers und geben Sie NUR ein JSON-Array mit den Indizes der relevanten Papers zurück.
 
 ${relaxed ? relaxedInstructions : strictInstructions}
 
 Papers:
 ${paperSummaries.map(p => `[${p.index}] ${p.title}\n   ${p.abstract}`).join("\n\n")}
 
-Return ONLY a JSON array of indices, e.g., [0, 2, 5, 7]. Select up to ${maxResults} most relevant papers.`
+Geben Sie NUR ein JSON-Array von Indizes zurück, z.B. [0, 2, 5, 7]. Wählen Sie bis zu ${maxResults} relevanteste Papers aus.`
       }],
       maxTokens: 600,
     });

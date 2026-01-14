@@ -20,23 +20,23 @@ interface EntryModeCard {
 const entryModes: EntryModeCard[] = [
   {
     mode: "idea",
-    title: "I have an idea",
+    title: "Ich habe eine Idee",
     description:
-      "You have an observation or pattern that sparked your interest. Let's explore whether it's a genuine puzzle.",
+      "Sie haben eine Beobachtung oder ein Muster, das Ihr Interesse geweckt hat. Lassen Sie uns erkunden, ob es ein genuines Puzzle ist.",
     icon: Lightbulb,
   },
   {
     mode: "data",
-    title: "I have data",
+    title: "Ich habe Daten",
     description:
-      "You have collected data and want to explore what stories it might tell. Let's discover what stands out.",
+      "Sie haben Daten gesammelt und möchten erkunden, welche Geschichten sie erzählen könnten. Lassen Sie uns entdecken, was heraussticht.",
     icon: Database,
   },
   {
     mode: "exploring",
-    title: "I'm exploring",
+    title: "Ich erkunde",
     description:
-      "You're curious about a topic but don't have a specific direction yet. Let's discover together.",
+      "Sie sind neugierig auf ein Thema, haben aber noch keine spezifische Richtung. Lassen Sie uns gemeinsam entdecken.",
     icon: Compass,
   },
 ];
@@ -85,10 +85,10 @@ export default function WelcomePage() {
         importSession(data);
         router.push("/conversation");
       } else {
-        alert("Invalid session file format. Please select a valid Scholarly Ideas export file.");
+        alert("Ungültiges Sitzungsdateiformat. Bitte wählen Sie eine gültige Scholarly Ideas Export-Datei.");
       }
     } catch {
-      alert("Failed to import session. Please check the file format.");
+      alert("Import der Sitzung fehlgeschlagen. Bitte überprüfen Sie das Dateiformat.");
     }
 
     // Reset the file input
@@ -157,13 +157,13 @@ export default function WelcomePage() {
             Research Discovery
           </p>
           <h2 className="font-display text-display-xl text-ink mb-6 leading-tight">
-            What brings you here today?
+            Was führt Sie heute hierher?
           </h2>
           <div className="editorial-divider max-w-xs mx-auto mb-6" />
           <p className="font-body text-body-lg text-slate max-w-2xl mx-auto leading-relaxed">
-            Good research starts with genuine puzzles—empirical patterns that
-            contradict or cannot be explained by existing theory. Let's develop
-            yours.
+            Gute Forschung beginnt mit genuinen Puzzles—empirischen Mustern, die 
+            bestehender Theorie widersprechen oder von ihr nicht erklärt werden können. 
+            Lassen Sie uns Ihres entwickeln.
           </p>
         </div>
 
@@ -181,9 +181,9 @@ export default function WelcomePage() {
                 isDropdownOpen && "ring-1 ring-burgundy border-burgundy"
               )}
             >
-              <span className="text-slate-muted">Subfield:</span>
+              <span className="text-slate-muted">Teilgebiet:</span>
               <span className="font-medium">
-                {selectedSubfield || "All areas"}
+                {selectedSubfield || "Alle Bereiche"}
               </span>
               <ChevronDown
                 className={cn(
@@ -206,7 +206,7 @@ export default function WelcomePage() {
                     !selectedSubfield && "bg-burgundy/5 text-burgundy font-medium"
                   )}
                 >
-                  All areas
+                  Alle Bereiche
                 </button>
                 {SUBFIELDS.map((subfield) => (
                   <button
@@ -275,11 +275,11 @@ export default function WelcomePage() {
         <div className="text-center mt-20">
           <div className="editorial-divider max-w-xs mx-auto mb-8" />
           <p className="font-body text-body-sm text-slate-muted mb-6 max-w-lg mx-auto">
-            Your data and conversations are processed transiently and never stored
-            on our servers.
+            Ihre Daten und Konversationen werden vorübergehend verarbeitet und niemals 
+            auf unseren Servern gespeichert.
             <br />
             <span className="font-medium text-slate">
-              Remember to export your session regularly to save your progress.
+              Denken Sie daran, Ihre Sitzung regelmäßig zu exportieren, um Ihren Fortschritt zu speichern.
             </span>
           </p>
 
@@ -299,7 +299,7 @@ export default function WelcomePage() {
                 )}
               >
                 <Download className="h-4 w-4" strokeWidth={1.5} />
-                Export current session
+                Aktuelle Sitzung exportieren
               </button>
             )}
 
@@ -316,7 +316,7 @@ export default function WelcomePage() {
               )}
             >
               <Upload className="h-4 w-4" strokeWidth={1.5} />
-              Import session
+              Sitzung importieren
             </button>
           </div>
           <input
@@ -331,17 +331,17 @@ export default function WelcomePage() {
           {/* Continue existing session hint */}
           {hasExistingSession ? (
             <p className="font-body text-caption text-slate-muted mt-3">
-              You have an active session with {session.messages.length} messages.{" "}
+              Sie haben eine aktive Sitzung mit {session.messages.length} Nachrichten.{" "}
               <button
                 onClick={() => router.push("/conversation")}
                 className="text-burgundy hover:underline"
               >
-                Continue working
+                Weiter arbeiten
               </button>
             </p>
           ) : (
             <p className="font-body text-caption text-slate-muted mt-3">
-              Lost your work? Import a previously exported session to continue.
+              Arbeit verloren? Importieren Sie eine zuvor exportierte Sitzung, um fortzufahren.
             </p>
           )}
         </div>

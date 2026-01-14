@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { v4 as uuidv4 } from "uuid";
 
 /**
  * Merge Tailwind CSS classes with clsx
@@ -12,7 +13,7 @@ export function cn(...inputs: ClassValue[]) {
  * Generate a UUID v4
  */
 export function generateId(): string {
-  return crypto.randomUUID();
+  return uuidv4();
 }
 
 /**
@@ -30,7 +31,7 @@ export function formatTimestamp(timestamp: string): string {
   return new Intl.DateTimeFormat('en-US', {
     hour: 'numeric',
     minute: '2-digit',
-    hour12: true,
+    hour12: false,
   }).format(date);
 }
 

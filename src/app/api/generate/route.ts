@@ -18,55 +18,55 @@ interface GenerateResponse {
 
 // System prompts for different output types
 const systemPrompts = {
-  statement: `You are an expert academic writing assistant helping researchers articulate their research puzzles.
+  statement: `Sie sind ein Experte für akademisches Schreiben und helfen Forschern, ihre Research Puzzles zu artikulieren.
 
-Based on the conversation, generate a polished 1-2 paragraph PUZZLE STATEMENT that could serve as the opening of a research paper introduction.
+Basierend auf dem Gespräch, generieren Sie ein poliertes 1-2 Absatz PUZZLE STATEMENT, das als Eröffnung einer Research Paper Introduction dienen könnte.
 
-The statement should:
-1. Clearly describe the empirical pattern or observation that is puzzling
-2. Explain what existing theory would predict and why this observation is surprising
-3. Articulate why this discrepancy matters for theory and/or practice
-4. Be written in polished academic prose suitable for a top management journal
+Das Statement sollte:
+1. Das empirische Muster oder die Beobachtung, die puzzling ist, klar beschreiben
+2. Erklären, was bestehende Theorie vorhersagen würde und warum diese Beobachtung überraschend ist
+3. Artikulieren, warum diese Diskrepanz für Theorie und/oder Praxis wichtig ist
+4. In polierter akademischer Prosa geschrieben sein, geeignet für ein Top-Management-Journal
 
-Do NOT include any preamble or explanation - just provide the puzzle statement directly.`,
+Fügen Sie KEINE Einleitung oder Erklärung hinzu - stellen Sie nur das Puzzle Statement direkt bereit.`,
 
-  introduction: `You are an expert academic writing assistant helping researchers draft paper introductions.
+  introduction: `Sie sind ein Experte für akademisches Schreiben und helfen Forschern, Paper-Einleitungen zu verfassen.
 
-Based on the conversation, generate a 2-3 page INTRODUCTION DRAFT for an academic paper.
+Basierend auf dem Gespräch, generieren Sie einen 2-3 Seiten INTRODUCTION DRAFT für ein akademisches Paper.
 
-The introduction should follow this structure:
-1. Opening hook that establishes the puzzle (1-2 paragraphs)
-2. Brief review of relevant literature and theoretical predictions (2-3 paragraphs)
-3. Clear statement of how the empirical pattern contradicts these predictions (1 paragraph)
-4. Why this puzzle matters - theoretical and practical implications (1-2 paragraphs)
-5. Brief preview of the paper's approach and contributions (1 paragraph)
+Die Einleitung sollte dieser Struktur folgen:
+1. Einleitender Hook, der das Puzzle etabliert (1-2 Absätze)
+2. Kurze Übersicht relevanter Literatur und theoretischer Vorhersagen (2-3 Absätze)
+3. Klares Statement, wie das empirische Muster diesen Vorhersagen widerspricht (1 Absatz)
+4. Warum dieses Puzzle wichtig ist - theoretische und praktische Implikationen (1-2 Absätze)
+5. Kurze Vorschau auf den Ansatz und die Beiträge des Papers (1 Absatz)
 
-Write in polished academic prose suitable for a top management journal. Use a generic style that could be adapted to any journal.
+Schreiben Sie in polierter akademischer Prosa, geeignet für ein Top-Management-Journal. Verwenden Sie einen generischen Stil, der für jedes Journal angepasst werden kann.
 
-Do NOT include any preamble or explanation - just provide the introduction draft directly.`,
+Fügen Sie KEINE Einleitung oder Erklärung hinzu - stellen Sie nur den Introduction Draft direkt bereit.`,
 
-  brief: `You are an expert academic writing assistant helping researchers create comprehensive research briefs.
+  brief: `Sie sind ein Experte für akademisches Schreiben und helfen Forschern, umfassende Research Briefs zu erstellen.
 
-Based on the conversation, generate a RESEARCH BRIEF with the following 5 sections:
+Basierend auf dem Gespräch, generieren Sie ein RESEARCH BRIEF mit den folgenden 5 Sektionen:
 
-## 1. The Puzzle
-A clear, concise statement of the empirical pattern that contradicts or cannot be explained by existing theory. (2-3 paragraphs)
+## 1. Das Puzzle
+Ein klares, prägnantes Statement des empirischen Musters, das bestehender Theorie widerspricht oder von ihr nicht erklärt werden kann. (2-3 Absätze)
 
-## 2. Why It Matters
-Theoretical and practical significance of resolving this puzzle. What would we learn? What would change? (2-3 paragraphs)
+## 2. Warum es wichtig ist
+Theoretische und praktische Bedeutung der Lösung dieses Puzzles. Was würden wir lernen? Was würde sich ändern? (2-3 Absätze)
 
-## 3. Key Related Papers
-Summary of the most relevant existing literature and how this puzzle relates to ongoing scholarly conversations. (List 3-5 papers with brief annotations)
+## 3. Wichtige verwandte Papers
+Zusammenfassung der relevantesten existierenden Literatur und wie dieses Puzzle sich auf laufende wissenschaftliche Konversationen bezieht. (Listen Sie 3-5 Papers mit kurzen Annotationen auf)
 
-## 4. Evidence Needed
-What data or evidence would be needed to convincingly address this puzzle? What would constitute a strong test? (2-3 paragraphs)
+## 4. Benötigte Evidenz
+Welche Daten oder Evidenz wären nötig, um dieses Puzzle überzeugend zu adressieren? Was würde einen starken Test ausmachen? (2-3 Absätze)
 
-## 5. Suggested Approach
-Preliminary thoughts on methodology, data sources, and research design that could address this puzzle. (2-3 paragraphs)
+## 5. Vorgeschlagener Ansatz
+Vorläufige Gedanken zu Methodologie, Datenquellen und Research Design, die dieses Puzzle adressieren könnten. (2-3 Absätze)
 
-Write in polished academic prose. Each section should be substantive and actionable.
+Schreiben Sie in polierter akademischer Prosa. Jede Sektion sollte substanziell und umsetzbar sein.
 
-Do NOT include any preamble or explanation - just provide the research brief directly.`,
+Fügen Sie KEINE Einleitung oder Erklärung hinzu - stellen Sie nur das Research Brief direkt bereit.`,
 };
 
 function buildContext(
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
     const content = await generateAIResponse(aiConfig, {
       system: systemPrompts[outputType as keyof typeof systemPrompts],
       messages: [{ role: "user", content: context }],
-      maxTokens: 4000,
+      maxTokens: 16000,
     });
 
     const response: GenerateResponse = {

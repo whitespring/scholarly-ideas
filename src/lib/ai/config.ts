@@ -11,8 +11,8 @@ export const PROVIDER_CONFIGS: Record<AIProvider, ProviderConfig> = {
     baseUrlConfigurable: false,
     models: [
       {
-        id: "claude-sonnet-4-20250514",
-        name: "Claude Sonnet 4",
+        id: "claude-sonnet-4-5",
+        name: "Claude Sonnet 4.5",
         contextWindow: 200000,
         maxOutputTokens: 8192,
         supportsStreaming: true,

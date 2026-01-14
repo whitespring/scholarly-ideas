@@ -56,5 +56,5 @@ export interface AIValidationResult {
 // Default settings for new users
 export const DEFAULT_AI_SETTINGS: AISettings = {
   provider: "anthropic",
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-5",
 };

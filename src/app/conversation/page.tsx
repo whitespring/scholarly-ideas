@@ -22,6 +22,9 @@ import {
   FileDown,
   Cpu,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import jsPDF from "jspdf";
 import { AIProviderSettings } from "@/components/settings/AIProviderSettings";
 import { PROVIDER_CONFIGS } from "@/lib/ai/config";
@@ -2251,7 +2254,80 @@ function MessageBubble({ message }: { message: Message }) {
             : "bg-white border border-parchment text-ink shadow-editorial"
         )}
       >
-        <p className="font-body text-body-md whitespace-pre-wrap leading-relaxed">{message.content}</p>
+        {isUser ? (
+          <p className="font-body text-body-md whitespace-pre-wrap leading-relaxed">{message.content}</p>
+        ) : (
+          <div className="prose prose-sm prose-gray max-w-none font-body text-body-md leading-relaxed">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw]}
+              components={{
+                p: ({ children }) => (
+                  <p className="mb-3 leading-relaxed">{children}</p>
+                ),
+                h1: ({ children }) => (
+                  <h1 className="text-xl font-display font-medium mb-3 mt-4 first:mt-0">{children}</h1>
+                ),
+                h2: ({ children }) => (
+                  <h2 className="text-lg font-display font-medium mb-3 mt-4 first:mt-0">{children}</h2>
+                ),
+                h3: ({ children }) => (
+                  <h3 className="text-lg font-display font-medium mb-2 mt-3 first:mt-0">{children}</h3>
+                ),
+                ul: ({ children }) => (
+                  <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>
+                ),
+                ol: ({ children }) => (
+                  <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>
+                ),
+                li: ({ children }) => (
+                  <li className="leading-relaxed">{children}</li>
+                ),
+                strong: ({ children }) => (
+                  <strong className="font-semibold">{children}</strong>
+                ),
+                em: ({ children }) => (
+                  <em className="italic">{children}</em>
+                ),
+                code: ({ children, className }) => {
+                  // Block code if it has className (language specifier) or contains newlines
+                  const isInline = !className && !String(children).includes('\n');
+                  return isInline ? (
+                    <code className="bg-slate-100 text-ink px-1.5 py-0.5 rounded text-sm font-mono">
+                      {children}
+                    </code>
+                  ) : (
+                    <code className="block bg-slate-100 text-ink p-3 rounded text-sm font-mono whitespace-pre-wrap">
+                      {children}
+                    </code>
+                  );
+                },
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-4 border-parchment pl-4 italic my-3">
+                    {children}
+                  </blockquote>
+                ),
+                table: ({ children }) => (
+                  <div className="overflow-x-auto my-3">
+                    <table className="min-w-full border border-parchment">
+                      {children}
+                    </table>
+                  </div>
+                ),
+                th: ({ children }) => (
+                  <th className="border border-parchment bg-parchment/50 px-3 py-2 text-left font-medium">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }) => (
+                  <td className="border border-parchment px-3 py-2">{children}</td>
+                ),
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        )}
         <div
           className={cn(
             "font-sans text-caption mt-3",

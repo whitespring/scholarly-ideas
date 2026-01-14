@@ -27,11 +27,20 @@ Through a hybrid approach combining Socratic dialogue, diagnostic assessment, an
 
 ### Multi-Provider AI Support
 Choose your preferred AI provider directly in the browser settings:
-- **Anthropic Claude** (Claude Sonnet 4, Claude 3.5 Haiku)
+- **Anthropic Claude** (Claude Sonnet 4.5, Claude Sonnet 4, Claude 3.5 Haiku)
 - **OpenAI** (GPT-4o, GPT-4o Mini, GPT-4 Turbo)
 - **Google Gemini** (Gemini 2.0 Flash, Gemini 1.5 Pro)
 - **Ollama** (Local models - Llama 3.2, Mistral, etc.)
 - **OpenAI-Compatible APIs** (Together, Groq, etc.)
+
+### Multilingual Support
+- **German Interface**: Complete UI translation with professional academic terminology
+- **Auto-Language Detection**: AI automatically responds in the user's language
+  - German input → German responses
+  - English input → English responses
+- **Bilingual Prompts**: All system prompts (Literature, Chat, Generate) available in both languages
+- **Academic Precision**: Technical terms maintained in English (Gap-Spotting, UTD24, pseudo-puzzles)
+- **Proper Markdown Rendering**: Generated outputs (statements, introductions, briefs) display with correct formatting
 
 ### Data Privacy
 - All data processed transiently—never stored on servers
@@ -62,7 +71,7 @@ Choose your preferred AI provider directly in the browser settings:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/matthewgrimes/scholarly-ideas.git
+   git clone https://github.com/whitespring/scholarly-ideas.git
    cd scholarly-ideas
    ```
 
@@ -188,6 +197,15 @@ npm start
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Recent Updates
+
+### v1.1.0 - German Translation & Model Updates (January 2026)
+- ✅ **Added Claude Sonnet 4.5 support** - Latest Anthropic model now available
+- ✅ **German Translation**: Complete UI and prompt translation for German-speaking researchers
+- ✅ **Auto-Language Detection**: Bilingual support with automatic language switching
+- ✅ **Fixed Markdown Rendering**: Proper formatting for generated research outputs (bold, italic, headings, lists)
+- ✅ **Academic Terminology**: Maintained English terms for precision and international compatibility
 
 ## License
 
